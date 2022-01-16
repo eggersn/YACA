@@ -1,0 +1,13 @@
+{
+    "initial": {
+        "instances": 4,
+        "path": "initial"
+    },
+    "multicast": {
+        "addr": "224.3.115.1",
+        "port": 33984
+    },
+    "discovery": {
+        "broadcast_port": 5039
+    }
+}
