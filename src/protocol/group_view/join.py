@@ -1,7 +1,7 @@
 from src.protocol.base import Message
 
 
-class GroupViewJoin(Message):
+class JoinRequest(Message):
     identifier: str
     pk: str
     port: int
