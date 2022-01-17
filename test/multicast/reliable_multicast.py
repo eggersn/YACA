@@ -13,7 +13,7 @@ from src.core.group_view.group_view import GroupView
 
 def consume(channel, group_view):
     seqno_dict = {}
-    for i in range(4000):
+    for i in range(40):
         data = channel.consume()
         message = Message.initFromJSON(data)
         message.decode()
@@ -39,7 +39,7 @@ def consume(channel, group_view):
                 print("FAILED: Process {1} expected ({2}, {3}) but got ({2}, {4})".format(group_view.identifier, msg_identifier, seqno_dict[msg_identifier], msg_value))
                 break 
 
-    if i == 3999:
+    if i == 39:
         print("SUCCESS: Process {}".format(group_view.identifier))
 
 def launch_process(i):
@@ -64,7 +64,7 @@ def launch_process(i):
     consume_thread = threading.Thread(target=consume, args=(channel, group_view,))
     consume_thread.start()
 
-    for i in range(1000):
+    for i in range(10):
         message = Message.initFromData("Test", content={"identifier": group_view.identifier, "value": i})
         reliable_multicast.send(message)
         
@@ -76,7 +76,7 @@ if __name__ == "__main__":
         p.start()
         processes.append(p)
 
-    time.sleep(100)
+    time.sleep(2)
     for p in processes:
         p.terminate()
         p.join()

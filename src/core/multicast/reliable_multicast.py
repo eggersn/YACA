@@ -137,34 +137,6 @@ class ReliableMulticast:
                 (self._multicast_addr, self._multicast_port),
             )
 
-    def _listen_multicast(self):
-        while True:
-            data, addr = self._multicast_listener.recvfrom(1024)
-            data = data.decode()
-
-            msg = Message.initFromJSON(data)
-            msg.decode()
-
-            if msg.verify_signature(self._signature, self._group_view):
-                if msg.header == "HeartBeat":
-                    self._receive_heartbeat(data, addr)
-                else:
-                    self._receive_pb_message(data, addr)
-
-    def _listen_unicast(self):
-        while True:
-            data, addr = self._udp_sock.recvfrom(1024)
-            data = data.decode()
-
-            msg = Message.initFromJSON(data)
-            msg.decode()
-
-            if msg.verify_signature(self._signature, self._group_view):
-                if msg.header == "NACK":
-                    self._receive_nack(data, addr)
-                else:
-                    self._receive_pb_message(data, addr)
-
     def _listen(self):
         while True:
             ready_socks,_,_ = select.select([self._udp_sock, self._multicast_listener], [], []) 

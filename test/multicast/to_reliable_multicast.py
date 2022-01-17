@@ -14,16 +14,13 @@ from src.core.multicast.to_reliable_multicast import TotalOrderedReliableMultica
 from src.core.group_view.group_view import GroupView
 
 def consume(channel, group_view):
-    t_start = time.time_ns() / 10 ** 6
     seqno_dict = {}
     for i in range(4000):
         data = channel.consume()
         message = Message.initFromJSON(data)
         message.decode()
 
-        t = time.time_ns() / 10 ** 6
-
-        print(i, t-t_start)
+        print(i, data)
 
         msg_identifier = message.content["identifier"]
         msg_value = message.content["value"]

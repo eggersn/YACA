@@ -2,7 +2,7 @@ import threading
 import time
 
 from src.protocol.multicast.piggyback import PiggybackMessage
-from reliable_multicast import ReliableMulticast
+from src.core.multicast.reliable_multicast import ReliableMulticast
 
 
 class CausalOrderedReliableMulticast(ReliableMulticast):

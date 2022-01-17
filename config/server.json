@@ -1,13 +1,13 @@
 {
     "initial": {
-        "instances": 4,
+        "instances": 16,
         "path": "initial"
     },
     "multicast": {
         "addr": "224.3.115.1",
         "client_port": 33984,
         "announcement_port": 5042,
-        "election_port": 35090
+        "coordination_port": 35090
     },
     "discovery": {
         "broadcast_port": 5039

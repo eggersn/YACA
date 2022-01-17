@@ -1,5 +1,6 @@
 import json
 import base64
+import uuid
 from nacl.signing import SigningKey, VerifyKey
 
 
@@ -30,11 +31,13 @@ class GroupView:
     def check_if_participant(self, id : str):
         return id in self.servers
 
-    def check_if_manager(self):
-        return self.identifier == self.manager
-
     def get_number_of_servers(self):
         return len(self.servers)
+
+    def get_ith_server(self, i):
+        return self.servers[i]
+
+
 
 
 
