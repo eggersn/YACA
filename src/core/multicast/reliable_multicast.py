@@ -2,6 +2,7 @@ import socket
 import struct
 import threading
 import time
+import select
 
 from src.core.signatures.signatures import Signatures
 from src.core.group_view.group_view import GroupView
@@ -25,6 +26,8 @@ class ReliableMulticast:
 
     _holdback_queue_lock = threading.Lock()
     _R_g_lock = threading.Lock()
+
+    _response_channel = Channel()
 
     def __init__(
         self,
@@ -88,10 +91,15 @@ class ReliableMulticast:
             pb_message.json_data.encode(), (self._multicast_addr, self._multicast_port)
         )
 
-        self._deliver(pb_message.json_data, self._identifier, self._S_p)
+        response = self._deliver(pb_message.json_data, self._identifier, self._S_p)
         self._S_p += 1
         self._check_holdback_queue()
         self._R_g_lock.release()
+
+        if not self._response_channel.is_empty():
+            response = self._response_channel.consume()
+            response_msg = Message.initFromJSON(response)
+            self.send(response_msg)
 
     def _send_unicast(self, message: Message, addr: tuple[str, int]):
         if not message.is_encoded:
@@ -107,10 +115,7 @@ class ReliableMulticast:
         self._send_unicast(nack, addr)
 
     def start(self):
-        listening_thread = threading.Thread(target=self._listen_multicast)
-        listening_thread.start()
-
-        listening_thread = threading.Thread(target=self._listen_unicast)
+        listening_thread = threading.Thread(target=self._listen)
         listening_thread.start()
 
         heartbeat_thread = threading.Thread(target=self._heartbeat)
@@ -160,6 +165,25 @@ class ReliableMulticast:
                 else:
                     self._receive_pb_message(data, addr)
 
+    def _listen(self):
+        while True:
+            ready_socks,_,_ = select.select([self._udp_sock, self._multicast_listener], [], []) 
+            for sock in ready_socks:
+                data, addr = sock.recvfrom(1024)
+                data = data.decode()
+
+                msg = Message.initFromJSON(data)
+                msg.decode()
+
+                if msg.verify_signature(self._signature, self._group_view):
+                    if msg.header == "HeartBeat":
+                        self._receive_heartbeat(data, addr)
+                    elif msg.header == "NACK":
+                        self._receive_nack(data, addr)
+                    else:
+                        self._receive_pb_message(data, addr)
+
+
     def _receive_heartbeat(self, data, addr):
         heartbeat = HeartBeat.initFromJSON(data)
         heartbeat.decode()
@@ -189,6 +213,7 @@ class ReliableMulticast:
             return
 
         nack_messages = {}
+        check_responses = False
 
         self._R_g_lock.acquire()
         if pb_message.identifier not in self._storage:
@@ -201,6 +226,7 @@ class ReliableMulticast:
             # message can be delivered instantly
             self._deliver(data, pb_message.identifier, pb_message.seqno)
             self._check_holdback_queue()
+            check_responses = True
 
         elif pb_message.seqno > self._R_g[pb_message.identifier] + 1:
             # there are missing messages => store message in holdback queue
@@ -232,6 +258,12 @@ class ReliableMulticast:
         self._handle_acks(pb_message.acks, addr, nack_messages)
 
         self._R_g_lock.release()
+
+        if check_responses:
+            if not self._response_channel.is_empty():
+                response = self._response_channel.consume()
+                response_msg = Message.initFromJSON(response)
+                self.send(response_msg)
 
     def _handle_acks(self, acks, addr, nack_messages={}):
         # send nacks if detecting missing messages

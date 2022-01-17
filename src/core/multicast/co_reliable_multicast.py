@@ -12,7 +12,6 @@ class CausalOrderedReliableMulticast(ReliableMulticast):
     _CO_R_g : dict[str, int] = {}
 
     def _deliver(self, data, identifier, seqno):
-        print("R-RECV", data)
         self._update_storage(data, identifier, seqno)
         self._co_consume(data, identifier, seqno)
 
@@ -26,13 +25,11 @@ class CausalOrderedReliableMulticast(ReliableMulticast):
         seqno_dict = pb_message.acks.copy()
         seqno_dict[identifier] = seqno - 1
 
-        print(self._CO_R_g)
-
         with self._co_lock:
             if self._check_if_ready_to_deliver(seqno_dict):
                 self._co_deliver(data, identifier, seqno)
-                self._check_co_holdback_queue()
                 self._CO_R_g[identifier] = seqno
+                self._check_co_holdback_queue()
             else:
                 self._co_holdback_queue.append((seqno_dict, data))
 
