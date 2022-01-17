@@ -7,7 +7,7 @@
         "addr": "224.3.115.1",
         "client_port": 33984,
         "announcement_port": 5042,
-        "coordination_port": 35090
+        "consensus_port": 35090
     },
     "discovery": {
         "broadcast_port": 5039

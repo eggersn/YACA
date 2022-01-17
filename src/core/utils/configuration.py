@@ -17,8 +17,8 @@ class Configuration:
     def get_announcement_multicast_port(self):
         return self.data["multicast"]["announcement_port"]
 
-    def get_coordination_multicast_port(self):
-        return self.data["multicast"]["coordination_port"]
+    def get_consensus_multicast_port(self):
+        return self.data["multicast"]["consensus_port"]
 
     def get_broadcast_port(self):
         return self.data["discovery"]["broadcast_port"]
