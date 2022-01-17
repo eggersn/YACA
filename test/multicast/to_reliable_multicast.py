@@ -37,6 +37,7 @@ def launch_process(i):
         message = TotalOrderMessage.initFromData("Test", {"identifier": group_view.identifier, "value": i}, msg_id)
         message.encode()
         reliable_multicast.send(message)
+        time.sleep(0.1)
 
     seqno_dict = {}
     for i in range(4000):
@@ -44,7 +45,7 @@ def launch_process(i):
         message = Message.initFromJSON(data)
         message.decode()
 
-        print(i, data)
+        print("C-CONSUME", i, data)
 
         msg_identifier = message.content["identifier"]
         msg_value = message.content["value"]
@@ -76,7 +77,7 @@ if __name__ == "__main__":
         p.start()
         processes.append(p)
 
-    time.sleep(300)
+    time.sleep(200)
     for p in processes:
         p.terminate()
         p.join()

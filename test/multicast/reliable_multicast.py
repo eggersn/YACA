@@ -31,6 +31,7 @@ def launch_process(i):
     for i in range(1000):
         message = Message.initFromData("Test", content={"identifier": group_view.identifier, "value": i})
         reliable_multicast.send(message)
+        time.sleep(0.1)
 
     seqno_dict = {}
     for i in range(4000):

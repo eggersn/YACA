@@ -23,17 +23,20 @@ def launch_process(i):
     file = "config/" + config.data["initial"]["path"] + "/" + files[i]
     group_view = GroupView(file)
 
+    sys.stdout = open("logs/" + files[i] + ".out", "a", buffering=1)
+    sys.stderr = open("logs/" + files[i] + ".out", "a", buffering=1)
+
     reliable_multicast = CausalOrderedReliableMulticast(
         multicast_addr, multicast_port, group_view.identifier, channel, group_view
     )
     reliable_multicast.start()
 
-    for i in range(1000):
+    for i in range(10000):
         message = Message.initFromData("Test", content={"identifier": group_view.identifier, "value": i})
         reliable_multicast.send(message)
 
     seqno_dict = {}
-    for i in range(4000):
+    for i in range(40000):
         data = channel.consume()
         message = Message.initFromJSON(data)
         message.decode()
@@ -55,7 +58,7 @@ def launch_process(i):
                 print("FAILED: Process {1} expected ({2}, {3}) but got ({2}, {4})".format(group_view.identifier, msg_identifier, seqno_dict[msg_identifier], msg_value))
                 break 
 
-    if i == 3999:
+    if i == 39999:
         print("SUCCESS: Process {}".format(group_view.identifier))
         
         
@@ -68,7 +71,7 @@ if __name__ == "__main__":
         p.start()
         processes.append(p)
 
-    time.sleep(10)
+    time.sleep(100)
     for p in processes:
         p.terminate()
         p.join()

@@ -17,3 +17,6 @@ class Channel:
         with self._lock:
             msg = self._queue.pop(0)
         return msg
+
+    def is_empty(self):
+        return len(self._queue) == 0

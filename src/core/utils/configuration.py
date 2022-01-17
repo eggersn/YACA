@@ -9,8 +9,14 @@ class Configuration:
     def get_multicast_addr(self):
         return self.data["multicast"]["addr"]
 
-    def get_multicast_port(self):
-        return self.data["multicast"]["port"]
+    def get_client_multicast_port(self):
+        return self.data["multicast"]["client_port"]
+
+    def get_announcement_multicast_port(self):
+        return self.data["multicast"]["announcement_port"]
+
+    def get_election_multicast_port(self):
+        return self.data["multicast"]["election_port"]
 
     def get_broadcast_port(self):
         return self.data["discovery"]["broadcast_port"]

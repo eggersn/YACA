@@ -5,6 +5,7 @@ from src.core.utils.channel import Channel
 from src.protocol.multicast.to_message import TotalOrderMessage
 from src.protocol.multicast.to_proposal import TotalOrderProposal
 from src.protocol.base import Message
+from src.protocol.multicast.piggyback import PiggybackMessage
 
 from co_reliable_multicast import CausalOrderedReliableMulticast
 
@@ -12,9 +13,11 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
     _P_g = -1
     _A_g = -1
 
-    _to_holdback_queue : list[list[tuple[int, str], str, str, list[str]]] = []
+    _to_holdback_dict : dict[str, list[str, list[str]]] = {}
+    _to_holdback_queue : list[list[tuple[int, str], str, int]] = []
     _response_channel = Channel()
-    _lock = threading.Lock()
+    _produce_channel = Channel()
+    _to_lock = threading.Lock()
 
     def __init__(self, multicast_addr: str, multicast_port: int, identifier: str, channel: Channel, group_view: GroupView):
         super().__init__(multicast_addr, multicast_port, identifier, channel, group_view)
@@ -29,50 +32,99 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
         message = Message.initFromJSON(data)
         message.decode()
 
-        with self._lock:
+        print("CO-RECV", data)
+
+        with self._to_lock:
             if message.header == "TO: Seqno Proposal":
                 message = TotalOrderProposal.initFromJSON(data)
                 message.decode()
+
+                print("Proposal from ", identifier + ": ( ", message.msg_identifier, message.seqno, ")")
 
                 entry = None
                 for e in self._to_holdback_queue:
                     if e[1] == message.msg_identifier:
                         entry = e
 
-                if entry is not None and identifier not in entry[3]:
-                    entry[3].append(identifier)
+                if entry is not None and identifier not in self._to_holdback_dict[entry[1]][1]:
+                    commited_servers = self._to_holdback_dict[entry[1]][1]
+                    commited_servers.append(identifier)
+                    entry[2] += 1
                     if entry[0] < (message.seqno, identifier):
                         entry[0] = (message.seqno, identifier)
-
-                    N = self._group_view.get_number_of_servers()
-
-                    if len(entry[3]) == N:
                         self._A_g = max(self._A_g, message.seqno)
                         self._to_holdback_queue.sort(key=lambda entry: entry[0])
 
-                        while len(self._to_holdback_queue) > 0 and len(self._to_holdback_queue[0][3]) == N:
+                    N = self._group_view.get_number_of_servers()
+
+                    while len(self._to_holdback_queue) > 0:
+                        entry = self._to_holdback_queue[0]
+
+                        if entry[2] == N:
                             entry = self._to_holdback_queue.pop(0)
-                            self._channel.produce(entry[2])
-                        if len(self._to_holdback_queue) > 0:
-                            print(self._to_holdback_queue[:min(5, len(self._to_holdback_queue))])
+                            print("DELIVER", self._to_holdback_dict[entry[1]][0])
+                            self._channel.produce(self._to_holdback_dict[entry[1]][0])
+                            del self._to_holdback_dict[entry[1]]
+                        else:
+                            break
+
+                    if len(self._to_holdback_queue) > 0:
+                        print("Queue:", len(self._to_holdback_queue), self._to_holdback_queue[:min(5, len(self._to_holdback_queue))])
 
 
             else:
+                print("MSG", data)
+
                 message = TotalOrderMessage.initFromJSON(data)
                 message.decode()
 
                 self._P_g = max(self._A_g, self._P_g) + 1
-                self._to_holdback_queue.append([(self._P_g, self._identifier), message.msg_identifier, data, [self._identifier]])
+                self._to_holdback_dict[message.msg_identifier] = [data, [self._identifier]]
+                self._to_holdback_queue.append([(self._P_g, self._identifier), message.msg_identifier, 1])
                 self._to_holdback_queue.sort(key=lambda entry: entry[0])
 
-                response = TotalOrderProposal.initFromData(self._P_g, message.msg_identifier)
-                response.encode()
-                
-                self._response_channel.produce(response.json_data)
+                response_msg = TotalOrderProposal.initFromData(self._P_g, message.msg_identifier)
+                response_msg.encode()
 
+                self._response_channel.produce(response_msg.json_data)
+                
+                
     def _consume(self):
         while True:
-            response = self._response_channel.consume()
-            message = Message.initFromJSON(response)
-            self.send(message)
+            data = None
+            if not self._response_channel.is_empty():
+                data = self._response_channel.consume()
+            elif not self._produce_channel.is_empty():
+                data = self._produce_channel.consume()
+            else:
+                time.sleep(0.05)
+
+            if data is not None:
+                message = Message.initFromJSON(data)
+                self._send(message)
+
+    def send(self, message: Message):
+        if not message.is_encoded:
+            message.encode()
+
+        self._produce_channel.produce(message.json_data)
+
+    def _send(self, message: Message):
+        if not message.is_decoded:
+            message.decode()
+        self._R_g_lock.acquire()
+        pb_message = PiggybackMessage.initFromMessage(
+            message, self._identifier, self._S_p, self._R_g
+        )
+        pb_message.encode()
+        pb_message.sign(self._signature)
+
+        self._udp_sock.sendto(
+            pb_message.json_data.encode(), (self._multicast_addr, self._multicast_port)
+        )
+
+        self._deliver(pb_message.json_data, self._identifier, self._S_p)
+        self._S_p += 1
+        self._check_holdback_queue()
+        self._R_g_lock.release()
 
