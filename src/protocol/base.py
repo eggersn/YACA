@@ -5,10 +5,13 @@ from src.core.signatures.signatures import Signatures
 
 
 class Message:
-    header: str
-    content: dict
-    meta: dict = {}
-    json_data: str
+
+    def __init__(self):
+        self.header: str
+        self.content: dict
+        self.meta: dict = {}
+        self.json_data: str
+        
 
     def encode(self):
         self.json_data = json.dumps(

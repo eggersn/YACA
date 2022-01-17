@@ -32,7 +32,9 @@ def launch_process(i):
 
     phase_king = PhaseKing(consensus_channel, out_channel, reliable_multicast, group_view)
 
-    value = phase_king.consensus("asdf")
+    value = "correct value" if i > 7 else "wrong value"
+
+    value = phase_king.consensus(value)
     print(value)
 
 if __name__ == "__main__":

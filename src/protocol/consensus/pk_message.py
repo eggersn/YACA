@@ -2,9 +2,11 @@ from src.protocol.base import Message
 
 
 class PhaseKingMessage(Message):
-    value : str 
-    phase : int 
-    round : int 
+    def __init__(self):
+        super().__init__()
+        self.value : str 
+        self.phase : int 
+        self.round : int 
 
     def encode(self):
         self.content = {"value": self.value, "phase": self.phase, "round": self.round}

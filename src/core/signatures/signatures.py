@@ -18,6 +18,7 @@ class Signatures:
             verify_key.verify(data, signature)
         except BadSignatureError as err:
             print(err)
+            raise err
             return False
 
         return True

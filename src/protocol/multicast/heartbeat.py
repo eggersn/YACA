@@ -1,7 +1,10 @@
 from src.protocol.base import Message
 
 class HeartBeat(Message):
-    acks: dict[str, int]
+
+    def __init__(self):
+        super().__init__()
+        self.acks: dict[str, int]
 
     def encode(self):
         self.content = {"acks": self.acks}
@@ -16,6 +19,6 @@ class HeartBeat(Message):
         message = cls()
         message.header = "HeartBeat"
         message.meta = {}
-        message.acks = acks
+        message.acks = acks.copy()
 
         return message

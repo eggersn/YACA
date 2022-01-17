@@ -14,21 +14,6 @@ from src.protocol.base import Message
 
 
 class ReliableMulticast:
-    _S_p = 0  # local sender sequence number
-    _R_g: dict[str, int] = {}  # delivered sequence numbers
-    _max_R_g: dict[
-        str, int
-    ] = {}  # max delivered sequence number registered by heartbeat
-
-    _holdback_queue: dict[str, dict[int, str]] = {}
-    _storage: dict[str, list[str]] = {}
-    _requested_messages: dict[str, tuple[int, int]] = {}
-
-    _holdback_queue_lock = threading.Lock()
-    _R_g_lock = threading.Lock()
-
-    _response_channel = Channel()
-
     def __init__(
         self,
         multicast_addr: str,
@@ -37,6 +22,21 @@ class ReliableMulticast:
         channel: Channel,
         group_view: GroupView,
     ):
+        self._S_p = 0  # local sender sequence number
+        self._R_g: dict[str, int] = {}  # delivered sequence numbers
+        self._max_R_g: dict[
+            str, int
+        ] = {}  # max delivered sequence number registered by heartbeat
+
+        self._holdback_queue: dict[str, dict[int, str]] = {}
+        self._storage: dict[str, list[str]] = {}
+        self._requested_messages: dict[str, tuple[int, int]] = {}
+
+        self._holdback_queue_lock = threading.Lock()
+        self._R_g_lock = threading.Lock()
+
+        self._response_channel = Channel()
+
         self._multicast_addr = multicast_addr
         self._multicast_port = multicast_port
         self._identifier = identifier
@@ -95,6 +95,7 @@ class ReliableMulticast:
         self._S_p += 1
         self._check_holdback_queue()
         self._R_g_lock.release()
+
 
         if not self._response_channel.is_empty():
             response = self._response_channel.consume()

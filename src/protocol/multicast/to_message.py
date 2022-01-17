@@ -2,7 +2,10 @@ from src.protocol.base import Message
 
 
 class TotalOrderMessage(Message):
-    msg_identifier : str
+
+    def __init__(self):
+        super().__init__()
+        self.msg_identifier : str
 
     def encode(self):
         self.meta["MsgIdentifier"] = {"id": self.msg_identifier}

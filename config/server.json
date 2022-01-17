@@ -1,6 +1,6 @@
 {
     "initial": {
-        "instances": 16,
+        "instances": 4,
         "path": "initial"
     },
     "multicast": {

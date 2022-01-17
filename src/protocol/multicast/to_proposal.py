@@ -2,8 +2,11 @@ from src.protocol.base import Message
 
 
 class TotalOrderProposal(Message):
-    msg_identifier : str
-    seqno : int
+
+    def __init__(self):
+        super().__init__()
+        self.msg_identifier : str
+        self.seqno : int
 
     def encode(self):
         self.content = {"seqno": self.seqno, "msg_identifier": self.msg_identifier}

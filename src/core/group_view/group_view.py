@@ -5,14 +5,14 @@ from nacl.signing import SigningKey, VerifyKey
 
 
 class GroupView:
-    servers: list[str]  # list of server identifiers
-    ports: dict[str, int] # list of listening ports for unicast communication
-    pks: dict[str, VerifyKey]  # list of public keys
-    sk: SigningKey  # private key
-    identifier: str
-    manager: str
-
     def __init__(self, file):
+        self.servers: list[str]  # list of server identifiers
+        self.ports: dict[str, int]  # list of listening ports for unicast communication
+        self.pks: dict[str, VerifyKey]  # list of public keys
+        self.sk: SigningKey  # private key
+        self.identifier: str
+        self.manager: str
+
         f = open(file)
         data = json.load(f)
         self.pks = {}
@@ -28,7 +28,7 @@ class GroupView:
 
         self.sk = SigningKey(base64.b64decode(data["sk"]))
 
-    def check_if_participant(self, id : str):
+    def check_if_participant(self, id: str):
         return id in self.servers
 
     def get_number_of_servers(self):
@@ -36,9 +36,3 @@ class GroupView:
 
     def get_ith_server(self, i):
         return self.servers[i]
-
-
-
-
-
-

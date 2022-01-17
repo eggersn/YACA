@@ -9,12 +9,10 @@ class PhaseKing:
     def __init__(
         self,
         consensus_channel: Channel,
-        out_channel: Channel,
         consensus_multicast: CausalOrderedReliableMulticast,
         group_view: GroupView,
     ):
         self._channel = consensus_channel
-        self._output = out_channel
         self._multicast = consensus_multicast
         self._group_view = group_view
 
@@ -23,7 +21,7 @@ class PhaseKing:
         f = int(N / 4)
 
         for phase in range(f + 1):
-            (majority_value, majority_count) = self._round1(value, phase)
+            majority_value, majority_count = self._round1(value, phase)
             value = self._round2(majority_value, majority_count, phase)
 
         return value
@@ -45,15 +43,19 @@ class PhaseKing:
                 pk_message = PhaseKingMessage.initFromJSON(data)
                 pk_message.decode()
 
-                print(phase, 1, data)
-
                 if pk_message.phase == phase and pk_message.round == 1:
                     break
 
             values.append(pk_message.value)
 
         c = Counter(values)
-        return c.most_common()[0]
+        (majority_value, majority_count) = c.most_common()[0]
+
+        if majority_count <= N / 2:
+            majority_value = ""
+            majority_count = 0
+        
+        return majority_value, majority_count
 
     def _round2(self, majority_value, majority_count, phase):
         phase_king = self._group_view.get_ith_server(phase)
@@ -69,8 +71,6 @@ class PhaseKing:
             data = self._channel.consume()
             pk_message = PhaseKingMessage.initFromJSON(data)
             pk_message.decode()
-
-            print(phase, 2, data)
 
             if pk_message.phase == phase and pk_message.round == 2:
                 break

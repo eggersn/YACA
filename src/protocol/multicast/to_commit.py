@@ -2,9 +2,12 @@ from src.protocol.base import Message
 
 
 class TotalOrderCommit(Message):
-    msg_identifier : str
-    identifier : str
-    seqno : int
+
+    def __init__(self):
+        super().__init__()
+        self.msg_identifier : str
+        self.identifier : str
+        self.seqno : int
 
     def encode(self):
         self.content = {"seqno": self.seqno, "identifier": self.identifier, "msg_identifier": self.msg_identifier}

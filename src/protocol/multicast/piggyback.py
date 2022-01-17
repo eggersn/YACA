@@ -2,9 +2,12 @@ from src.protocol.base import Message
 
 
 class PiggybackMessage(Message):
-    identifier : str 
-    seqno : int
-    acks : dict[str, int]
+
+    def __init__(self):
+        super().__init__()
+        self.identifier : str 
+        self.seqno : int
+        self.acks : dict[str, int]
 
     def encode(self):
         self.meta["SeqVector"] = {"identifier": self.identifier, "seqno": self.seqno, "acks": self.acks}
@@ -20,7 +23,7 @@ class PiggybackMessage(Message):
     def initFromData(cls, header, content, identifier, seqno, acks):
         message = cls()
         message.header = header 
-        message.content = content 
+        message.content = content.copy()
         message.identifier = identifier
         message.seqno = seqno
         message.acks = acks.copy()
@@ -31,8 +34,8 @@ class PiggybackMessage(Message):
     def initFromMessage(cls, msg : Message, identifier, seqno, acks):
         message = cls()
         message.header = msg.header
-        message.content = msg.content
-        message.meta = msg.meta
+        message.content = msg.content.copy()
+        message.meta = msg.meta.copy()
         message.identifier = identifier
         message.seqno = seqno
         message.acks = acks.copy()

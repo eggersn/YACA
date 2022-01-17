@@ -1,15 +1,18 @@
 import threading
-import time
-
+from src.core.group_view.group_view import GroupView
+from src.core.utils.channel import Channel
 from src.protocol.multicast.piggyback import PiggybackMessage
 from src.core.multicast.reliable_multicast import ReliableMulticast
 
 
 class CausalOrderedReliableMulticast(ReliableMulticast):
-    _co_holdback_queue: list[tuple[dict[str, int], str]] = []
-    _co_lock = threading.Lock()
 
-    _CO_R_g : dict[str, int] = {}
+    def __init__(self, multicast_addr: str, multicast_port: int, identifier: str, channel: Channel, group_view: GroupView):
+        super().__init__(multicast_addr, multicast_port, identifier, channel, group_view)
+
+        self._co_holdback_queue: list[tuple[dict[str, int], str]] = []
+        self._co_lock = threading.Lock()
+        self._CO_R_g : dict[str, int] = {}
 
     def _deliver(self, data, identifier, seqno):
         self._update_storage(data, identifier, seqno)
