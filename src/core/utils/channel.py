@@ -3,22 +3,30 @@ import threading
 
 class Channel:
     def __init__(self):
-        self._semaphore = threading.Semaphore(0)
-        self._lock = threading.Lock()
-        self._queue = []
+        self._semaphores = {"": threading.Semaphore(0)}
+        self._locks = {"": threading.Lock()}
+        self._config_lock = threading.Lock()
+        self._topic_queues = {"": []}
 
-    def produce(self, msg):
-        with self._lock:
-            self._queue.append(msg)
-            self._semaphore.release()
+    def create_topic(self, topic):
+        with self._config_lock:
+            if topic not in self._topic_queues:
+                self._topic_queues[topic] = []
+                self._locks[topic] = threading.Lock()
+                self._semaphores[topic] = threading.Semaphore(0)
 
-    def consume(self):
-        self._semaphore.acquire()
-        with self._lock:
-            msg = self._queue.pop(0)
+    def produce(self, msg, topic=""):
+        with self._locks[topic]:
+            self._topic_queues[topic].append(msg)
+            self._semaphores[topic].release()
+
+    def consume(self, topic=""):
+        self._semaphores[topic].acquire()
+        with self._locks[topic]:
+            msg = self._topic_queues[topic].pop(0)
         return msg
 
-    def is_empty(self):
-        with self._lock:
-            size = len(self._queue)
+    def is_empty(self, topic=""):
+        with self._locks[topic]:
+            size = len(self._topic_queues[topic])
         return size == 0

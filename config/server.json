@@ -1,6 +1,6 @@
 {
     "initial": {
-        "instances": 4,
+        "instances": 16,
         "path": "initial"
     },
     "multicast": {
@@ -11,5 +11,11 @@
     },
     "discovery": {
         "broadcast_port": 5039
+    },
+    "heartbeat": {
+        "interval": 0.05
+    },
+    "crash_fault_detection": {
+        "timeout": 3
     }
 }

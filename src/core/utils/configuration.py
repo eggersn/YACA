@@ -27,6 +27,12 @@ class Configuration:
         files = os.listdir("config/" + self.data["initial"]["path"] + "/")
         return "config/" + self.data["initial"]["path"] + "/" + files[i]
 
+    def get_heartbeat_interval(self):
+        return self.data["heartbeat"]["interval"]
+
+    def get_timeout(self):
+        return self.data["crash_fault_detection"]["timeout"]
+
     def generate_uuid(self):
         return str(uuid.uuid4())
 

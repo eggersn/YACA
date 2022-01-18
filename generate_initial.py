@@ -11,8 +11,8 @@ def setup():
 
     data = {} 
 
-    for _ in range(config["initial"]["instances"]):
-        identifier = str(uuid.uuid4())
+    for i in range(config["initial"]["instances"]):
+        identifier = "server" + str(i)
         data[identifier] = {}
 
     for identifier in data:

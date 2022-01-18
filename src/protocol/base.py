@@ -5,7 +5,6 @@ from src.core.signatures.signatures import Signatures
 
 
 class Message:
-
     def __init__(self):
         self.header: str
         self.content: dict
@@ -65,6 +64,18 @@ class Message:
 
         return valid
 
+    def get_signature(self):
+        if self.is_signed:
+            return self.meta["signature"]
+        else:
+            return None, None
+
+    def get_topic(self):
+        if self.has_topic:
+            return self.meta["topic"]
+        else:
+            return ""
+
     @property
     def is_encoded(self):
         if hasattr(self, "json_data"):
@@ -73,9 +84,23 @@ class Message:
 
     @property
     def is_decoded(self):
-        if hasattr(self, "content"):
+        if hasattr(self, "header"):
             return True
         return False
+
+    @property 
+    def is_signed(self):
+        if not self.is_decoded:
+            self.decode()
+
+        return "signature" in self.meta
+
+    @property
+    def has_topic(self):
+        if not self.is_decoded:
+            self.decode()
+
+        return "topic" in self.meta
 
     @classmethod
     def initFromJSON(cls, json_data):

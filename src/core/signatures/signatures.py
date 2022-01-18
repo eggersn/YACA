@@ -1,7 +1,6 @@
 from nacl.signing import SigningKey, VerifyKey
 from nacl.exceptions import BadSignatureError
 
-
 class Signatures:
     def __init__(self, sk: SigningKey, identifier : str):
         self.identifier = identifier
@@ -22,3 +21,4 @@ class Signatures:
             return False
 
         return True
+

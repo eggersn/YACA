@@ -1,4 +1,5 @@
 import json
+from src.core.utils.configuration import Configuration
 from src.protocol.base import Message
 from src.core.multicast.co_reliable_multicast import CausalOrderedReliableMulticast
 from src.core.multicast.to_reliable_multicast import TotalOrderedReliableMulticast
@@ -15,11 +16,12 @@ class ByzantineTotalOrderedReliableMulticast(TotalOrderedReliableMulticast):
         identifier: str,
         channel: Channel,
         group_view: GroupView,
+        configuration: Configuration,
         consensus_channel: Channel,
         consensus_multicast: CausalOrderedReliableMulticast,
     ):
         super().__init__(
-            multicast_addr, multicast_port, identifier, channel, group_view
+            multicast_addr, multicast_port, identifier, channel, group_view, configuration
         )
 
         self._phase_king = PhaseKing(consensus_channel, consensus_multicast, group_view)

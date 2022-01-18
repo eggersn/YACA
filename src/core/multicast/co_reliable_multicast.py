@@ -1,25 +1,37 @@
 import threading
+from src.core.utils.configuration import Configuration
 from src.core.group_view.group_view import GroupView
 from src.core.utils.channel import Channel
 from src.protocol.multicast.piggyback import PiggybackMessage
+from src.protocol.base import Message
 from src.core.multicast.reliable_multicast import ReliableMulticast
 
 
 class CausalOrderedReliableMulticast(ReliableMulticast):
-
-    def __init__(self, multicast_addr: str, multicast_port: int, identifier: str, channel: Channel, group_view: GroupView):
-        super().__init__(multicast_addr, multicast_port, identifier, channel, group_view)
+    def __init__(
+        self,
+        multicast_addr: str,
+        multicast_port: int,
+        identifier: str,
+        channel: Channel,
+        group_view: GroupView,
+        configuration: Configuration,
+    ):
+        super().__init__(multicast_addr, multicast_port, identifier, channel, group_view, configuration)
 
         self._co_holdback_queue: list[tuple[dict[str, int], str]] = []
         self._co_lock = threading.Lock()
-        self._CO_R_g : dict[str, int] = {}
+        self._CO_R_g: dict[str, int] = {}
 
     def _deliver(self, data, identifier, seqno):
         self._update_storage(data, identifier, seqno)
         self._co_consume(data, identifier, seqno)
 
     def _co_deliver(self, data, identifier, seqno):
-        self._channel.produce(data)
+        message = Message.initFromJSON(data)
+        message.decode()
+
+        self._channel.produce(data, message.get_topic())
 
     def _co_consume(self, data, identifier, seqno):
         pb_message = PiggybackMessage.initFromJSON(data)

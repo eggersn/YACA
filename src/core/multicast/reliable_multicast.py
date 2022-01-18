@@ -4,6 +4,7 @@ import threading
 import time
 import select
 
+from src.core.utils.configuration import Configuration
 from src.core.signatures.signatures import Signatures
 from src.core.group_view.group_view import GroupView
 from src.core.utils.channel import Channel
@@ -21,12 +22,11 @@ class ReliableMulticast:
         identifier: str,
         channel: Channel,
         group_view: GroupView,
+        configuration: Configuration,
     ):
         self._S_p = 0  # local sender sequence number
         self._R_g: dict[str, int] = {}  # delivered sequence numbers
-        self._max_R_g: dict[
-            str, int
-        ] = {}  # max delivered sequence number registered by heartbeat
+        self._max_R_g: dict[str, int] = {}  # max delivered sequence number registered by heartbeat
 
         self._holdback_queue: dict[str, dict[int, str]] = {}
         self._storage: dict[str, list[str]] = {}
@@ -42,6 +42,7 @@ class ReliableMulticast:
         self._identifier = identifier
         self._channel = channel
         self._group_view = group_view
+        self._configuration = configuration
         self._signature = Signatures(group_view.sk, self._group_view.identifier)
 
         self._setup_multicast_listener()
@@ -53,9 +54,7 @@ class ReliableMulticast:
 
     def _setup_multicast_listener(self):
         # create listener socket
-        self._multicast_listener = socket.socket(
-            socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP
-        )
+        self._multicast_listener = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
 
         # Enable to run multiple clients and servers on a single (host,port)
         self._multicast_listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
@@ -69,9 +68,7 @@ class ReliableMulticast:
         # on all interfaces.
         group = socket.inet_aton(self._multicast_addr)
         mreq = struct.pack("4sL", group, socket.INADDR_ANY)
-        self._multicast_listener.setsockopt(
-            socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq
-        )
+        self._multicast_listener.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
 
     def _setup_udp_sock(self):
         self._udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -81,21 +78,16 @@ class ReliableMulticast:
         if not message.is_decoded:
             message.decode()
         self._R_g_lock.acquire()
-        pb_message = PiggybackMessage.initFromMessage(
-            message, self._identifier, self._S_p, self._R_g
-        )
+        pb_message = PiggybackMessage.initFromMessage(message, self._identifier, self._S_p, self._R_g)
         pb_message.encode()
         pb_message.sign(self._signature)
 
-        self._udp_sock.sendto(
-            pb_message.json_data.encode(), (self._multicast_addr, self._multicast_port)
-        )
+        self._udp_sock.sendto(pb_message.json_data.encode(), (self._multicast_addr, self._multicast_port))
 
         response = self._deliver(pb_message.json_data, self._identifier, self._S_p)
         self._S_p += 1
         self._check_holdback_queue()
         self._R_g_lock.release()
-
 
         if not self._response_channel.is_empty():
             response = self._response_channel.consume()
@@ -123,8 +115,9 @@ class ReliableMulticast:
         heartbeat_thread.start()
 
     def _heartbeat(self):
+        interval = self._configuration.get_heartbeat_interval()
         while True:
-            time.sleep(0.05)
+            time.sleep(interval)
 
             acks = self._R_g.copy()
             acks[self._identifier] = self._S_p
@@ -140,22 +133,27 @@ class ReliableMulticast:
 
     def _listen(self):
         while True:
-            ready_socks,_,_ = select.select([self._udp_sock, self._multicast_listener], [], []) 
+            ready_socks, _, _ = select.select([self._udp_sock, self._multicast_listener], [], [])
             for sock in ready_socks:
                 data, addr = sock.recvfrom(1024)
                 data = data.decode()
 
                 msg = Message.initFromJSON(data)
                 msg.decode()
+                sender_id, _ = msg.get_signature()
 
                 if msg.verify_signature(self._signature, self._group_view):
                     if msg.header == "HeartBeat":
-                        self._receive_heartbeat(data, addr)
+                        if not self._group_view.check_if_server_is_suspended(sender_id):
+                            self._receive_heartbeat(data, addr)
                     elif msg.header == "NACK":
-                        self._receive_nack(data, addr)
+                        if not self._group_view.check_if_server_is_suspended(sender_id):
+                            self._receive_nack(data, addr)
                     else:
-                        self._receive_pb_message(data, addr)
-
+                        if sock == self._udp_sock or not self._group_view.check_if_server_is_suspended(
+                            sender_id
+                        ):
+                            self._receive_pb_message(data, addr)
 
     def _receive_heartbeat(self, data, addr):
         heartbeat = HeartBeat.initFromJSON(data)
@@ -173,9 +171,7 @@ class ReliableMulticast:
                     if seqno >= len(self._storage[identifier]):
                         break
 
-                    nack_response = PiggybackMessage.initFromJSON(
-                        self._storage[identifier][seqno]
-                    )
+                    nack_response = PiggybackMessage.initFromJSON(self._storage[identifier][seqno])
                     self._send_unicast(nack_response, addr)
 
     def _receive_pb_message(self, data, addr):
@@ -183,6 +179,13 @@ class ReliableMulticast:
         pb_message.decode()
 
         if pb_message.identifier == self._identifier:
+            return
+
+        # only accept old messages of suspended servers
+        if (
+            self._group_view.check_if_server_is_suspended(pb_message.identifier)
+            and pb_message.seqno > self._max_R_g[pb_message.identifier]
+        ):
             return
 
         nack_messages = {}
@@ -206,13 +209,8 @@ class ReliableMulticast:
             with self._holdback_queue_lock:
                 self._holdback_queue[pb_message.identifier][pb_message.seqno] = data
 
-                if (
-                    self._requested_messages[pb_message.identifier][0] + 50
-                    < time.time_ns() / 10 ** 6
-                ):
-                    self._requested_messages[pb_message.identifier][1] = self._R_g[
-                        pb_message.identifier
-                    ]
+                if self._requested_messages[pb_message.identifier][0] + 50 < time.time_ns() / 10 ** 6:
+                    self._requested_messages[pb_message.identifier][1] = self._R_g[pb_message.identifier]
 
                 # send nacks
                 missing_messages = list(
@@ -263,15 +261,11 @@ class ReliableMulticast:
                     nack_messages[ack] = missing_messages
 
         if len(nack_messages) > 0:
-            nack_count = sum(
-                [len(nack_messages[identifier]) for identifier in nack_messages]
-            )
+            nack_count = sum([len(nack_messages[identifier]) for identifier in nack_messages])
             if nack_count > 100:
                 for identifier in nack_messages:
                     l = len(nack_messages[identifier])
-                    nack_messages[identifier] = nack_messages[identifier][
-                        : int(100 * l / nack_count)
-                    ]
+                    nack_messages[identifier] = nack_messages[identifier][: int(100 * l / nack_count)]
 
                     l = len(nack_messages[identifier])
                     if l > 0:
@@ -292,9 +286,7 @@ class ReliableMulticast:
         if identifier != self._identifier:
             self._R_g[identifier] = seqno
             self._requested_messages[identifier][0] = time.time_ns() / 10 ** 6
-            self._requested_messages[identifier][1] = max(
-                seqno, self._requested_messages[identifier][1]
-            )
+            self._requested_messages[identifier][1] = max(seqno, self._requested_messages[identifier][1])
 
     def _check_holdback_queue(self):
         change = True
