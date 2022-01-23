@@ -4,7 +4,7 @@ from src.protocol.base import Message
 class PhaseKingMessage(Message):
     def __init__(self):
         super().__init__()
-        self.value
+        self.value = None
         self.phase: int
         self.round: int
         self.topic: str

@@ -7,26 +7,26 @@ from src.core.multicast.co_reliable_multicast import CausalOrderedReliableMultic
 from src.protocol.consensus.pk_message import PhaseKingMessage, Message
 from src.protocol.consensus.suspect import GroupViewSuspect
 from collections import Counter
+from src.core.consensus.phase_king import PhaseKing
 
 
-class PhaseKing:
+class MaxPhaseKing(PhaseKing):
     def __init__(
         self,
         consensus_channel: Channel,
         consensus_multicast: CausalOrderedReliableMulticast,
         group_view: GroupView,
         configuration: Configuration,
+        max = max,
         topic="",
         verbose=False,
     ):
-        self._channel = consensus_channel
-        self._multicast = consensus_multicast
-        self._group_view = group_view
-        self._configuration = configuration
-        self._topic = topic
+        super().__init__(consensus_channel, consensus_multicast, group_view, configuration, topic, verbose)
+        self._max = max
         self.__verbose = verbose
 
-    def consensus(self, value: str):
+
+    def consensus(self, value):
         # Importantly, we require that all processes have the same value for N.
         # This is achieved by the fact, that we execute this algorithm solely after delivering
         # a message via TO-multicast (which handles coordination and in particular JOIN messages)
@@ -39,8 +39,9 @@ class PhaseKing:
                 "PhaseKing (Phase {}): King {}".format(phase, self._group_view.get_ith_server(phase + offset))
             )
 
-            majority_value, majority_count = self._round1(value, phase, N - f)
-            value, offset = self._round2(majority_value, majority_count, phase, N - f, offset)
+            majority_value, majority_count, max_value = self._round1(value, phase, N - f)
+            new_value, offset = self._round2(majority_value, majority_count, max_value, phase, N - f, offset)
+            value = max(new_value, value)
             self.__debug('PhaseKing (Phase {}): Result "{}"'.format(phase, value))
 
         return value
@@ -66,7 +67,7 @@ class PhaseKing:
 
         self.__debug(
             'PhaseKing ({}Phase {} - Round 1): Initial value "{}"'.format(
-                (self._topic + "; ") if self._topic != "" else "", phase, value
+                ((self._topic + "; ")) if self._topic is not None else "", phase, value
             )
         )
 
@@ -122,6 +123,7 @@ class PhaseKing:
         # determine majority value and return
         c = Counter(values)
         (majority_value, majority_count) = c.most_common()[0]
+        max_value = self._max(values)
 
         if majority_count <= N / 2:
             majority_value = ""
@@ -133,56 +135,7 @@ class PhaseKing:
             )
         )
 
-        return majority_value, majority_count
-
-    def _handle_round1_phaseking_msg(self, data, sender_ids, values, phase, i):
-        pk_message = PhaseKingMessage.initFromJSON(data)
-        pk_message.decode()
-
-        sender_id, _ = pk_message.get_signature()
-
-        if pk_message.phase == phase and pk_message.round == 1 and sender_id not in sender_ids:
-            sender_ids.append(sender_id)
-            values.append(pk_message.value)
-            i += 1
-
-        return i
-
-    def _handle_round1_suspect_msg(
-        self, data, suspected_servers, sender_ids, values, phase, N, no_of_correct_processes
-    ):
-        suspect_msg = GroupViewSuspect.initFromJSON(data)
-        suspect_msg.decode()
-
-        sender_id, _ = suspect_msg.get_signature()
-
-        if self._group_view.check_if_participant(suspect_msg.identifier):
-            if suspect_msg.identifier not in suspected_servers:
-                suspected_servers[suspect_msg.identifier] = []
-
-            if sender_id not in suspected_servers[suspect_msg.identifier]:
-                suspected_servers[suspect_msg.identifier].append(sender_id)
-
-                # check if enough servers suspect the same process
-                if len(suspected_servers[suspect_msg.identifier]) >= no_of_correct_processes:
-                    if not self._group_view.check_if_server_is_suspended(suspect_msg.identifier):
-                        N -= 1
-
-                        self.__debug(
-                            'PhaseKing ({}Phase {} - Round 1): Suspending "{}"'.format(
-                                (self._topic + "; ") if self._topic != "" else "",
-                                phase,
-                                suspect_msg.identifier,
-                            )
-                        )
-                        self._group_view.suspend_server(suspect_msg.identifier)
-
-                        if suspect_msg.identifier in sender_ids:
-                            index = sender_ids.index(suspect_msg.identifier)
-                            sender_ids.pop(index)
-                            values.pop(index)
-
-        return N
+        return majority_value, majority_count, max_value
 
     """
     In Round2 of the Phase-King algorithm, the processes await the tiebreaker value from the phase king. 
@@ -190,7 +143,7 @@ class PhaseKing:
     If a phase king is suspended, the process with the next higher id is selected - until there exists a correct phase king. 
     """
 
-    def _round2(self, majority_value, majority_count, phase, no_of_correct_processes, offset):
+    def _round2(self, majority_value, majority_count, max_value, phase, no_of_correct_processes, offset):
         def timeout_handler(i):
             phase_king = self._group_view.get_ith_server(i)
             suspect_msg = GroupViewSuspect.initFromData(phase_king, self._topic)
@@ -217,7 +170,7 @@ class PhaseKing:
             timer = None
             # check if this process is the phase king
             if phase_king == self._group_view.identifier:
-                pk_message = PhaseKingMessage.initFromData(majority_value, phase, 2, self._topic)
+                pk_message = PhaseKingMessage.initFromData(max_value, phase, 2, self._topic)
                 pk_message.encode()
                 self._multicast.send(pk_message)
 
