@@ -4,7 +4,7 @@ from src.protocol.base import Message
 class PhaseKingMessage(Message):
     def __init__(self):
         super().__init__()
-        self.value: str
+        self.value
         self.phase: int
         self.round: int
         self.topic: str
@@ -23,7 +23,7 @@ class PhaseKingMessage(Message):
         self.topic = self.get_topic()
 
     @classmethod
-    def initFromData(cls, value: str, phase: int, round: int, topic: str = ""):
+    def initFromData(cls, value, phase: int, round: int, topic: str = ""):
         message = cls()
         message.header = "Phase King: Message"
         message.value = value

@@ -15,7 +15,7 @@ from src.core.group_view.group_view import GroupView
 
 def consume(channel, group_view):
     seqno_dict = {}
-    for i in range(4000):
+    for i in range(400):
         data = channel.consume()
         message = Message.initFromJSON(data)
         message.decode()
@@ -39,7 +39,7 @@ def consume(channel, group_view):
                 print("FAILED: Process {1} expected ({2}, {3}) but got ({2}, {4})".format(group_view.identifier, msg_identifier, seqno_dict[msg_identifier], msg_value))
                 break 
 
-    if i == 3999:
+    if i == 399:
         print("SUCCESS: Process {}".format(group_view.identifier))
 
 def launch_process(i):
@@ -57,14 +57,14 @@ def launch_process(i):
     sys.stderr = open("logs/" + files[i] + ".out", "a", buffering=1)
 
     reliable_multicast = TotalOrderedReliableMulticast(
-        multicast_addr, multicast_port, group_view.identifier, channel, group_view
+        multicast_addr, multicast_port, group_view.identifier, channel, group_view, config, True
     )
     reliable_multicast.start()
 
     consume_thread = threading.Thread(target=consume, args=(channel, group_view,))
     consume_thread.start()
 
-    for i in range(1000):
+    for i in range(100):
         msg_id = str(uuid.uuid4())
         message = TotalOrderMessage.initFromData("Test", {"identifier": group_view.identifier, "value": i}, msg_id)
         message.encode()
@@ -73,12 +73,12 @@ def launch_process(i):
 
 if __name__ == "__main__":
     processes = []
-    for i in range(4):
+    for i in range(3):
         p = multiprocessing.Process(target=launch_process, args=(i,))
         p.start()
         processes.append(p)
 
-    time.sleep(200)
+    time.sleep(30)
     for p in processes:
         p.terminate()
         p.join()

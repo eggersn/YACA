@@ -1,0 +1,12 @@
+
+Total Ordered Multicast:
+
+1. Byzantine
+Currently, we assume that processes honestly select their sequence numbers A_g and P_g. The easiest solution is to perform the Max-PhaseKing algorithm on the gathered sequence numbers to get the highest of them (if all processes are honest) or an even higher one (if there are malicious processes)
+
+2. Crash Fault Tolerance:
+Furthermore, we have to cover the case that not each of the N processes proposes a sequence number. 
+    i) For each process p_i and p_j, p_i adds a timestamp to the first message of p_j in the holdback queue
+    ii) periodically check for timeouts
+    iii) send and collect suspend messages similar to phaseking 
+    iv) suspend servers if necessary 
