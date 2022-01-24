@@ -57,7 +57,7 @@ def launch_process(i):
     sys.stderr = open("logs/" + files[i] + ".out", "a", buffering=1)
 
     reliable_multicast = ReliableMulticast(
-        multicast_addr, multicast_port, group_view.identifier, channel, group_view
+        multicast_addr, multicast_port, group_view.identifier, channel, group_view, config
     )
     reliable_multicast.start()
 

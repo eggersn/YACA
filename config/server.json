@@ -6,11 +6,14 @@
     "multicast": {
         "addr": "224.3.115.1",
         "client_port": 33984,
+        "database_port": 30495,
         "announcement_port": 5042,
         "consensus_port": 35090
     },
     "discovery": {
-        "broadcast_port": 5039
+        "broadcast_port": 5039,
+        "manager_timeout": 0.1,
+        "total_timeout": 10
     },
     "heartbeat": {
         "interval": 0.05

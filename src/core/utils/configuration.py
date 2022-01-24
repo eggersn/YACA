@@ -14,6 +14,9 @@ class Configuration:
     def get_client_multicast_port(self):
         return self.data["multicast"]["client_port"]
 
+    def get_db_multicast_port(self):
+        return self.data["multicast"]["database_port"]
+
     def get_announcement_multicast_port(self):
         return self.data["multicast"]["announcement_port"]
 

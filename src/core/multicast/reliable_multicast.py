@@ -23,12 +23,13 @@ class ReliableMulticast:
         channel: Channel,
         group_view: GroupView,
         configuration: Configuration,
+        open: bool = False,
     ):
         self._S_p = 0  # local sender sequence number
-        self._R_g: dict[str, int] = {}  # delivered sequence numbers
+        self._R_g: dict[str, int] = {identifier: -1}  # delivered sequence numbers
         self._max_R_g: dict[str, int] = {}  # max delivered sequence number registered by heartbeat
 
-        self._holdback_queue: dict[str, dict[int, str]] = {}
+        self._holdback_queue: dict[str, dict[int, str]] = {identifier: {}}
         self._storage: dict[str, list[str]] = {}
         self._requested_messages: dict[str, tuple[int, int]] = {}
 
@@ -43,7 +44,10 @@ class ReliableMulticast:
         self._channel = channel
         self._group_view = group_view
         self._configuration = configuration
-        self._signature = Signatures(group_view.sk, self._group_view.identifier)
+        self._open = open
+
+        if self._group_view is not None:
+            self._signature = Signatures(group_view.sk, self._group_view.identifier)
 
         self._setup_multicast_listener()
         self._setup_udp_sock()
@@ -51,6 +55,13 @@ class ReliableMulticast:
         self._storage = {identifier: []}
 
         self._timeoffset = time.time_ns() / 10 ** 9
+
+        self._suspend_multicast = False
+        self._contraint_multicast = False
+
+        self.terminate = False
+        self.listening_thread = None
+        self.heartbeat_thread = None
 
     def _setup_multicast_listener(self):
         # create listener socket
@@ -80,13 +91,19 @@ class ReliableMulticast:
         self._R_g_lock.acquire()
         pb_message = PiggybackMessage.initFromMessage(message, self._identifier, self._S_p, self._R_g)
         pb_message.encode()
-        pb_message.sign(self._signature)
+
+        if not self._open:
+            pb_message.sign(self._signature)
 
         self._udp_sock.sendto(pb_message.json_data.encode(), (self._multicast_addr, self._multicast_port))
 
-        response = self._deliver(pb_message.json_data, self._identifier, self._S_p)
+        if self._check_delivery_contraint(self._identifier, self._S_p):
+            response = self._deliver(pb_message.json_data, self._identifier, self._S_p)
+            self._check_holdback_queue()
+        else:
+            self._holdback_queue[self._identifier][self._S_p] = pb_message.json_data
+
         self._S_p += 1
-        self._check_holdback_queue()
         self._R_g_lock.release()
 
         if not self._response_channel.is_empty():
@@ -107,24 +124,38 @@ class ReliableMulticast:
 
         self._send_unicast(nack, addr)
 
-    def start(self):
-        listening_thread = threading.Thread(target=self._listen)
-        listening_thread.start()
+    def start(self, listen=True):
+        self.terminate = False
+        if listen and not self._open:
+            self.listening_thread = threading.Thread(target=self._listen)
+        elif listen and self._open:
+            self.listening_thread = threading.Thread(target=self._listen_open)
+        else:
+            self.listening_thread = threading.Thread(target=self._listen_for_nacks)
+        self.listening_thread.start()
 
-        heartbeat_thread = threading.Thread(target=self._heartbeat)
-        heartbeat_thread.start()
+        self.heartbeat_thread = threading.Thread(target=self._heartbeat)
+        self.heartbeat_thread.start()
+
+    def stop(self):
+        self.terminate = True
+
+        if self.heartbeat_thread is not None:
+            self.heartbeat_thread.join()
+            self.heartbeat_thread = None
+        if self.listening_thread is not None:
+            self.listening_thread.join()
+            self.listening_thread = None
 
     def _heartbeat(self):
         interval = self._configuration.get_heartbeat_interval()
-        while True:
+        while not self.terminate:
             time.sleep(interval)
 
-            acks = self._R_g.copy()
-            acks[self._identifier] = self._S_p
-
-            heartbeat = HeartBeat.initFromData(acks)
+            heartbeat = HeartBeat.initFromData(self._R_g)
             heartbeat.encode()
-            heartbeat.sign(self._signature)
+            if not self._open:
+                heartbeat.sign(self._signature)
 
             self._udp_sock.sendto(
                 heartbeat.json_data.encode(),
@@ -132,7 +163,7 @@ class ReliableMulticast:
             )
 
     def _listen(self):
-        while True:
+        while not self.terminate:
             ready_socks, _, _ = select.select([self._udp_sock, self._multicast_listener], [], [])
             for sock in ready_socks:
                 data, addr = sock.recvfrom(1024)
@@ -154,6 +185,40 @@ class ReliableMulticast:
                             sender_id
                         ):
                             self._receive_pb_message(data, addr)
+
+    def _listen_open(self):
+        while not self.terminate:
+            ready_socks, _, _ = select.select([self._udp_sock, self._multicast_listener], [], [])
+            for sock in ready_socks:
+                data, addr = sock.recvfrom(1024)
+                data = data.decode()
+
+                msg = Message.initFromJSON(data)
+                msg.decode()
+                sender_id, _ = msg.get_signature()
+
+                if msg.header == "HeartBeat":
+                    self._receive_heartbeat(data, addr)
+                elif msg.header == "NACK":
+                    if msg.verify_signature(self._signature, self._group_view):
+                        if not self._group_view.check_if_server_is_suspended(sender_id):
+                            self._receive_nack(data, addr)
+                else:
+                    self._receive_pb_message(data, addr)
+
+    def _listen_for_nacks(self):
+        while not self.terminate:
+            ready_socks, _, _ = select.select([self._udp_sock], [], [])
+            for sock in ready_socks:
+                data, addr = sock.recvfrom(1024)
+                data = data.decode()
+
+                msg = Message.initFromJSON(data)
+                msg.decode()
+
+                if msg.header == "NACK":
+                    self._receive_nack(data, addr)
+
 
     def _receive_heartbeat(self, data, addr):
         heartbeat = HeartBeat.initFromJSON(data)
@@ -198,7 +263,9 @@ class ReliableMulticast:
             self._holdback_queue[pb_message.identifier] = {}
             self._requested_messages[pb_message.identifier] = [0, -1]
 
-        if pb_message.seqno == self._R_g[pb_message.identifier] + 1:
+        if pb_message.seqno == self._R_g[pb_message.identifier] + 1 and self._check_delivery_contraint(
+            pb_message.identifier, pb_message.seqno
+        ):
             # message can be delivered instantly
             self._deliver(data, pb_message.identifier, pb_message.seqno)
             self._check_holdback_queue()
@@ -283,8 +350,8 @@ class ReliableMulticast:
     def _update_storage(self, data, identifier, seqno):
         # update storage and acks
         self._storage[identifier].append(data)
+        self._R_g[identifier] = seqno
         if identifier != self._identifier:
-            self._R_g[identifier] = seqno
             self._requested_messages[identifier][0] = time.time_ns() / 10 ** 6
             self._requested_messages[identifier][1] = max(seqno, self._requested_messages[identifier][1])
 
@@ -314,5 +381,25 @@ class ReliableMulticast:
                 for stale_message in stale_messages:
                     del self._holdback_queue[identifier][stale_message]
 
-    def wait_on_join(self):
-        self.suspend_multicast = True
+    def _check_delivery_contraint(self, identifier, seqno):
+        if self._suspend_multicast:
+            return False
+        elif self._contraint_multicast:
+            if identifier not in self._multicast_contraint:
+                return False
+            if seqno > self._multicast_contraint[identifier]:
+                return False
+            return True
+        else:
+            return True
+
+    def halt_delivery(self):
+        self._suspend_multicast = True
+
+    def continue_delivery(self):
+        self._contraint_multicast = False
+
+    def set_delivery_contraint(self, seqno_dict):
+        self._suspend_multicast = False
+        self._contraint_multicast = True
+        self._multicast_contraint = seqno_dict.copy()
