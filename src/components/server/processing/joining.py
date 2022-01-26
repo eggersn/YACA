@@ -15,43 +15,48 @@ from src.core.unicast.sender import UnicastSender
 from src.core.consensus.phase_king import PhaseKing
 
 
-class AnnouncementProcessing:
+class JoinProcessing:
     def __init__(
         self,
         announcement_channel: Channel,
         consensus_channel: Channel,
-        announcement_multicast: TotalOrderedReliableMulticast,
-        phase_king: PhaseKing,
         group_view: GroupView,
         configuration: Configuration,
+        semaphore: threading.Semaphore
     ):
         self._channel = announcement_channel
         self._consensus_channel = consensus_channel
-        self._to_multicast = announcement_multicast
-        self._phase_king = phase_king
         self._group_view = group_view
         self._configuration = configuration
         self._signature = Signatures(group_view.sk, group_view.identifier)
-
-        self._udp_sender = UnicastSender(self._configuration)
+        self._phase_king = PhaseKing(
+            self._consensus_channel, None, self._group_view, self._configuration, verbose=True
+        )
+        self._semaphore = semaphore
 
     def start(self):
-        consumer_thread = threading.Thread(target=self.consumer)
-        consumer_thread.start()
+        self.consumer()
 
     def consumer(self):
-        while True:
+        print("START CONSUMING")
+        finished = False 
+        while not finished:
             data = self._channel.consume()
-            print("CONSUME", data)
+            print("CONSUME JOIN", data)
+            finished = self._process_request(data)
 
-            self._process_request(data)
+        print("Stop CONSUMING")
+        self._group_view.flag_ready_to_join()
+        print("END CONSUMING")
 
     def _process_request(self, data):
         msg = Message.initFromJSON(data)
         msg.decode()
 
         if "View: Join Message" == msg.header:
-            self._process_join(data)
+            return self._process_join(data)
+
+        return False
 
     def _process_join(self, data):
         join_msg = JoinMsg.initFromJSON(data)
@@ -69,7 +74,7 @@ class AnnouncementProcessing:
 
         data = shortened_data.split("#")
         if len(data) != 4:
-            return
+            return False
 
         pk = VerifyKey(base64.b64decode(data[1]))
         # this allows the new server to send nacks and consume the storage of to-multicast
@@ -79,15 +84,12 @@ class AnnouncementProcessing:
         # note that, due to the phaseking algorithm before, all honest servers suspend the server if at least one honest server does so
         if not join_request.verify_signature(self._signature, self._group_view):
             self._group_view.suspend_server(join_request.identifier)
-            return
+            return False 
 
-        # notify the new server that we halted further delivery and sending
-        response = JoinResponse.initFromData("waiting")
-        success = self._udp_sender.send_udp_sync(response, (data[2], int(data[3])))
-        if not success:
-            # TODO undo halt
-            self._group_view.suspend_server(join_request.identifier)
-            return
-
-        # halt delivery and sending
-        self._to_multicast.halt_multicast(join_request.identifier)
+        if join_request.identifier == self._group_view.identifier:
+            return True 
+        else:
+            print("ACQUIRE")
+            self._semaphore.acquire()
+            print("ACQUIRED")
+            return False

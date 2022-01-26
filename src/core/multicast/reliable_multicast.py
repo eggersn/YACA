@@ -85,31 +85,35 @@ class ReliableMulticast:
         self._udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._udp_sock.bind(("", 0))
 
-    def send(self, message: Message):
+    def send(self, message: Message, config=False):
         if not message.is_decoded:
             message.decode()
-        self._R_g_lock.acquire()
-        pb_message = PiggybackMessage.initFromMessage(message, self._identifier, self._S_p, self._R_g)
-        pb_message.encode()
+            
+        if not self._suspend_multicast or config:
+            self._R_g_lock.acquire()
+            pb_message = PiggybackMessage.initFromMessage(message, self._identifier, self._S_p, self._R_g)
+            pb_message.encode()
 
-        if not self._open:
-            pb_message.sign(self._signature)
+            if not self._open:
+                pb_message.sign(self._signature)
 
-        self._udp_sock.sendto(pb_message.json_data.encode(), (self._multicast_addr, self._multicast_port))
-
-        if self._check_delivery_contraint(self._identifier, self._S_p):
+            print("SEND", pb_message.json_data)
+            self._udp_sock.sendto(pb_message.json_data.encode(), (self._multicast_addr, self._multicast_port))
             response = self._deliver(pb_message.json_data, self._identifier, self._S_p)
             self._check_holdback_queue()
+
+            self._S_p += 1
+            self._R_g_lock.release()
+
+            if not self._response_channel.is_empty():
+                response, config = self._response_channel.consume()
+                response_msg = Message.initFromJSON(response)
+                self.send(response_msg, config)
         else:
-            self._holdback_queue[self._identifier][self._S_p] = pb_message.json_data
+            if not message.is_encoded:
+                message.encode()
+            self._response_channel.produce((message.json_data, False))
 
-        self._S_p += 1
-        self._R_g_lock.release()
-
-        if not self._response_channel.is_empty():
-            response = self._response_channel.consume()
-            response_msg = Message.initFromJSON(response)
-            self.send(response_msg)
 
     def _send_unicast(self, message: Message, addr: tuple[str, int]):
         if not message.is_encoded:
@@ -121,18 +125,21 @@ class ReliableMulticast:
         nack = NegativeAcknowledgement.initFromData(messages)
         nack.encode()
         nack.sign(self._signature)
-
         self._send_unicast(nack, addr)
 
-    def start(self, listen=True):
+    def start(self, listen=True, trash=False):
+        if trash:
+            self._response_channel.set_trash_flag(True)
+
         self.terminate = False
-        if listen and not self._open:
-            self.listening_thread = threading.Thread(target=self._listen)
-        elif listen and self._open:
-            self.listening_thread = threading.Thread(target=self._listen_open)
-        else:
-            self.listening_thread = threading.Thread(target=self._listen_for_nacks)
-        self.listening_thread.start()
+        if self.listening_thread is None or not self.listening_thread.is_alive():
+            if listen and not self._open:
+                self.listening_thread = threading.Thread(target=self._listen)
+            elif listen and self._open:
+                self.listening_thread = threading.Thread(target=self._listen_open)
+            else:
+                self.listening_thread = threading.Thread(target=self._listen_for_nacks)
+            self.listening_thread.start()
 
         self.heartbeat_thread = threading.Thread(target=self._heartbeat)
         self.heartbeat_thread.start()
@@ -147,11 +154,16 @@ class ReliableMulticast:
             self.listening_thread.join()
             self.listening_thread = None
 
+    def disable_responses(self):
+        self._response_channel.set_trash_flag(True)
+    
+    def enable_responses(self):
+        self._response_channel.set_trash_flag(False)
+
     def _heartbeat(self):
         interval = self._configuration.get_heartbeat_interval()
         while not self.terminate:
             time.sleep(interval)
-
             heartbeat = HeartBeat.initFromData(self._R_g)
             heartbeat.encode()
             if not self._open:
@@ -175,7 +187,7 @@ class ReliableMulticast:
 
                 if msg.verify_signature(self._signature, self._group_view):
                     if msg.header == "HeartBeat":
-                        if not self._group_view.check_if_server_is_suspended(sender_id):
+                        if not self._group_view.check_if_server_is_inactive(sender_id):
                             self._receive_heartbeat(data, addr)
                     elif msg.header == "NACK":
                         if not self._group_view.check_if_server_is_suspended(sender_id):
@@ -195,15 +207,19 @@ class ReliableMulticast:
 
                 msg = Message.initFromJSON(data)
                 msg.decode()
-                sender_id, _ = msg.get_signature()
 
                 if msg.header == "HeartBeat":
                     self._receive_heartbeat(data, addr)
                 elif msg.header == "NACK":
                     if msg.verify_signature(self._signature, self._group_view):
-                        if not self._group_view.check_if_server_is_suspended(sender_id):
+                        sender_id, _ = msg.get_signature()
+                        if not self._group_view.check_if_server_is_inactive(sender_id):
                             self._receive_nack(data, addr)
                 else:
+                    msg.set_sender(addr)
+                    msg.encode()
+                    data = msg.json_data
+
                     self._receive_pb_message(data, addr)
 
     def _listen_for_nacks(self):
@@ -219,12 +235,11 @@ class ReliableMulticast:
                 if msg.header == "NACK":
                     self._receive_nack(data, addr)
 
-
     def _receive_heartbeat(self, data, addr):
         heartbeat = HeartBeat.initFromJSON(data)
         heartbeat.decode()
-
-        self._handle_acks(heartbeat.acks, addr)
+        with self._R_g_lock:
+            self._handle_acks(heartbeat.acks, addr, {})
 
     def _receive_nack(self, data, addr):
         nack = NegativeAcknowledgement.initFromJSON(data)
@@ -263,9 +278,7 @@ class ReliableMulticast:
             self._holdback_queue[pb_message.identifier] = {}
             self._requested_messages[pb_message.identifier] = [0, -1]
 
-        if pb_message.seqno == self._R_g[pb_message.identifier] + 1 and self._check_delivery_contraint(
-            pb_message.identifier, pb_message.seqno
-        ):
+        if pb_message.seqno == self._R_g[pb_message.identifier] + 1:
             # message can be delivered instantly
             self._deliver(data, pb_message.identifier, pb_message.seqno)
             self._check_holdback_queue()
@@ -276,7 +289,11 @@ class ReliableMulticast:
             with self._holdback_queue_lock:
                 self._holdback_queue[pb_message.identifier][pb_message.seqno] = data
 
-                if self._requested_messages[pb_message.identifier][0] + 50 < time.time_ns() / 10 ** 6:
+                if (
+                    self._requested_messages[pb_message.identifier][0]
+                    + self._configuration.get_heartbeat_interval()
+                    < time.time_ns() / 10 ** 6
+                ):
                     self._requested_messages[pb_message.identifier][1] = self._R_g[pb_message.identifier]
 
                 # send nacks
@@ -299,33 +316,37 @@ class ReliableMulticast:
 
         if check_responses:
             if not self._response_channel.is_empty():
-                response = self._response_channel.consume()
+                response, config = self._response_channel.consume()
                 response_msg = Message.initFromJSON(response)
-                self.send(response_msg)
+                self.send(response_msg, config)
 
-    def _handle_acks(self, acks, addr, nack_messages={}):
+    def _handle_acks(self, acks, addr, nack_messages):
         # send nacks if detecting missing messages
         for ack in acks:
-            if ack not in self._max_R_g or (acks[ack] > self._max_R_g[ack]):
-                self._max_R_g[ack] = acks[ack]
+            if ack in self._group_view.servers:
+                if ack not in self._max_R_g or (acks[ack] > self._max_R_g[ack]):
+                    self._max_R_g[ack] = acks[ack]
 
-            if ack != self._identifier:
-                if ack not in self._storage:
-                    self._storage[ack] = []
-                    self._R_g[ack] = -1
-                    self._holdback_queue[ack] = {}
-                    self._requested_messages[ack] = [0, -1]
+                if ack != self._identifier:
+                    if ack not in self._storage:
+                        self._storage[ack] = []
+                        self._R_g[ack] = -1
+                        self._holdback_queue[ack] = {}
+                        self._requested_messages[ack] = [0, -1]
 
-                if self._requested_messages[ack][0] + 50 < time.time_ns() / 10 ** 6:
-                    self._requested_messages[ack][1] = self._R_g[ack]
+                    if (
+                        self._requested_messages[ack][0] + self._configuration.get_heartbeat_interval()
+                        < time.time_ns() / 10 ** 6
+                    ):
+                        self._requested_messages[ack][1] = self._R_g[ack]
 
-                missing_messages = list(
-                    set(range(self._requested_messages[ack][1] + 1, acks[ack] + 1))
-                    - set(self._holdback_queue[ack].keys())
-                )
+                    missing_messages = list(
+                        set(range(self._requested_messages[ack][1] + 1, acks[ack] + 1))
+                        - set(self._holdback_queue[ack].keys())
+                    )
 
-                if len(missing_messages) != 0:
-                    nack_messages[ack] = missing_messages
+                    if len(missing_messages) != 0:
+                        nack_messages[ack] = missing_messages
 
         if len(nack_messages) > 0:
             nack_count = sum([len(nack_messages[identifier]) for identifier in nack_messages])
@@ -340,11 +361,11 @@ class ReliableMulticast:
                             self._requested_messages[identifier][1],
                             nack_messages[identifier][-1],
                         )
-
             self._send_nack(nack_messages, addr)
 
     def _deliver(self, data, identifier, seqno):
-        self._channel.produce(data)
+        if self._channel is not None:
+            self._channel.produce(data)
         self._update_storage(data, identifier, seqno)
 
     def _update_storage(self, data, identifier, seqno):
@@ -381,25 +402,9 @@ class ReliableMulticast:
                 for stale_message in stale_messages:
                     del self._holdback_queue[identifier][stale_message]
 
-    def _check_delivery_contraint(self, identifier, seqno):
-        if self._suspend_multicast:
-            return False
-        elif self._contraint_multicast:
-            if identifier not in self._multicast_contraint:
-                return False
-            if seqno > self._multicast_contraint[identifier]:
-                return False
-            return True
-        else:
-            return True
-
-    def halt_delivery(self):
+    def halt_sending(self):
         self._suspend_multicast = True
 
-    def continue_delivery(self):
-        self._contraint_multicast = False
-
-    def set_delivery_contraint(self, seqno_dict):
+    def continue_sending(self):
         self._suspend_multicast = False
-        self._contraint_multicast = True
-        self._multicast_contraint = seqno_dict.copy()
+

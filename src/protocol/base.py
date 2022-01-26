@@ -49,6 +49,7 @@ class Message:
         identifier = self.meta["signature"][0]
         
         if not group_view.check_if_participant(identifier):
+            print("not participant", identifier, group_view.servers)
             return False
 
         signature = base64.b64decode(self.meta["signature"][1])
@@ -70,9 +71,26 @@ class Message:
         else:
             return None, None
 
+    def set_sender(self, addr):
+        if "sender" not in self.meta:
+            self.meta["sender"] = addr
+
+    def get_sender(self):
+        if "sender" in self.meta:
+            return tuple(self.meta["sender"])
+
     def get_topic(self):
         if self.has_topic:
             return self.meta["topic"]
+        else:
+            return ""
+
+    def set_nonce(self, nonce : str):
+        self.meta["nonce"] = nonce 
+    
+    def get_nonce(self):
+        if self.has_nonce:
+            return self.meta["nonce"]
         else:
             return ""
 
@@ -101,6 +119,13 @@ class Message:
             self.decode()
 
         return "topic" in self.meta
+
+    @property 
+    def has_nonce(self):
+        if not self.is_decoded:
+            self.decode()
+
+        return "nonce" in self.meta
 
     @classmethod
     def initFromJSON(cls, json_data):

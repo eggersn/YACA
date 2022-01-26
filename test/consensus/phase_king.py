@@ -22,7 +22,7 @@ def normal_test(i):
     files = os.listdir("config/" + config.data["initial"]["path"] + "/")
     files.sort(key=lambda s: int(s.split("server")[1].split(".json")[0]))
     file = "config/" + config.data["initial"]["path"] + "/" + files[i]
-    group_view = GroupView(file)
+    group_view = GroupView.initFromFile(file)
 
     sys.stdout = open("logs/" + files[i] + ".out", "a", buffering=1)
     sys.stderr = open("logs/" + files[i] + ".out", "a", buffering=1)
@@ -56,7 +56,7 @@ def topic_test(i):
     files = os.listdir("config/" + config.data["initial"]["path"] + "/")
     files.sort(key=lambda s: int(s.split("server")[1].split(".json")[0]))
     file = "config/" + config.data["initial"]["path"] + "/" + files[i]
-    group_view = GroupView(file)
+    group_view = GroupView.initFromFile(file)
 
     sys.stdout = open("logs/" + files[i] + ".out", "a", buffering=1)
     sys.stderr = open("logs/" + files[i] + ".out", "a", buffering=1)
@@ -85,7 +85,7 @@ def crash_test(i):
     files = os.listdir("config/" + config.data["initial"]["path"] + "/")
     files.sort(key=lambda s: int(s.split("server")[1].split(".json")[0]))
     file = "config/" + config.data["initial"]["path"] + "/" + files[i]
-    group_view = GroupView(file)
+    group_view = GroupView.initFromFile(file)
 
     sys.stdout = open("logs/" + files[i] + ".out", "a", buffering=1)
     sys.stderr = open("logs/" + files[i] + ".out", "a", buffering=1)

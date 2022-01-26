@@ -51,7 +51,7 @@ def launch_process(i):
     files = os.listdir("config/" + config.data["initial"]["path"] + "/")
     files.sort()
     file = "config/" + config.data["initial"]["path"] + "/" + files[i]
-    group_view = GroupView(file)
+    group_view = GroupView.initFromFile(file)
 
     sys.stdout = open("logs/" + files[i] + ".out", "a", buffering=1)
     sys.stderr = open("logs/" + files[i] + ".out", "a", buffering=1)

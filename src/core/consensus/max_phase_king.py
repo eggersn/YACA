@@ -57,7 +57,7 @@ class MaxPhaseKing(PhaseKing):
         # on timeout, send suspect message for all servers that did not respond
         def timeout_handler(sender_ids):
             for server_id in self._group_view.servers:
-                if server_id not in sender_ids and not self._group_view.check_if_server_is_suspended(
+                if server_id not in sender_ids and not self._group_view.check_if_server_is_inactive(
                     server_id
                 ):
                     suspect_msg = GroupViewSuspect.initFromData(server_id, self._topic)
@@ -96,7 +96,7 @@ class MaxPhaseKing(PhaseKing):
             message.decode()
 
             sender_id, _ = message.get_signature()
-            if not self._group_view.check_if_server_is_suspended(sender_id):
+            if not self._group_view.check_if_server_is_inactive(sender_id):
                 if message.header == "Phase King: Message":
                     i = self._handle_round1_phaseking_msg(data, sender_ids, values, phase, i)
 
@@ -155,7 +155,7 @@ class MaxPhaseKing(PhaseKing):
 
         while tiebreaker is None:
             phase_king = self._group_view.get_ith_server(phase + offset)
-            while self._group_view.check_if_server_is_suspended(phase_king):
+            while self._group_view.check_if_server_is_inactive(phase_king):
                 offset += 1
                 phase_king = self._group_view.get_ith_server(phase + offset)
 
@@ -191,7 +191,7 @@ class MaxPhaseKing(PhaseKing):
                 message.decode()
 
                 sender_id, _ = message.get_signature()
-                if not self._group_view.check_if_server_is_suspended(sender_id):
+                if not self._group_view.check_if_server_is_inactive(sender_id):
                     if message.header == "Phase King: Message":
                         pk_message = PhaseKingMessage.initFromJSON(data)
                         pk_message.decode()
@@ -210,7 +210,7 @@ class MaxPhaseKing(PhaseKing):
                             suspecting_servers.append(sender_id)
 
                             if len(suspecting_servers) >= no_of_correct_processes:
-                                if not self._group_view.check_if_server_is_suspended(phase_king):
+                                if not self._group_view.check_if_server_is_inactive(phase_king):
                                     offset += 1
                                     self.__debug(
                                         'PhaseKing ({}Phase {} - Round 2): Suspending King "{}"'.format(

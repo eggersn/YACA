@@ -1,6 +1,28 @@
 {
     "initial": {
         "instances": 4,
+        "specs": [
+            {
+                "id": "server1",
+                "ip_addr": "192.168.1.103",
+                "port": 27893
+            },
+            {
+                "id": "server2",
+                "ip_addr": "192.168.1.103",
+                "port": 23403
+            },
+            {
+                "id": "server3",
+                "ip_addr": "192.168.1.103",
+                "port": 22043
+            },
+            {
+                "id": "server4",
+                "ip_addr": "192.168.1.103",
+                "port": 21938
+            }
+        ],
         "path": "initial"
     },
     "multicast": {
@@ -16,7 +38,7 @@
         "total_timeout": 10
     },
     "heartbeat": {
-        "interval": 0.05
+        "interval": 0.2
     },
     "crash_fault_detection": {
         "timeout": 3

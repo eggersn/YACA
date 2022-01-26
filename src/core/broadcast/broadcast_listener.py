@@ -22,7 +22,7 @@ class BroadcastListener:
             data = data.decode()
 
             # write data to channel to be consumed by server
-            self._request_channel.produce(data)
+            self._request_channel.produce((data, addr))
 
     def start(self):
         listening_thread = threading.Thread(target=self.listen)

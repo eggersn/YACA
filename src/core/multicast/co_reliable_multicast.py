@@ -30,7 +30,6 @@ class CausalOrderedReliableMulticast(ReliableMulticast):
     def _co_deliver(self, data, identifier, seqno):
         message = Message.initFromJSON(data)
         message.decode()
-
         self._channel.produce(data, message.get_topic())
 
     def _co_consume(self, data, identifier, seqno):

@@ -26,9 +26,20 @@ class Configuration:
     def get_broadcast_port(self):
         return self.data["discovery"]["broadcast_port"]
 
+    def get_discovery_manager_timeout(self):
+        return self.data["discovery"]["manager_timeout"]
+
+    def get_discovery_total_timeout(self):
+        return self.data["discovery"]["total_timeout"]
+
     def get_group_view_file(self, i):
         files = os.listdir("config/" + self.data["initial"]["path"] + "/")
+        files.remove("global.json")
+        files.sort()
         return "config/" + self.data["initial"]["path"] + "/" + files[i]
+
+    def get_global_group_view_file(self):
+        return "config/" + self.data["initial"]["path"] + "/global.json"
 
     def get_heartbeat_interval(self):
         return self.data["heartbeat"]["interval"]
@@ -41,3 +52,4 @@ class Configuration:
 
     def generate_key(self):
         return SigningKey.generate()
+
