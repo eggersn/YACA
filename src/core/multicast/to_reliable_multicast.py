@@ -28,6 +28,7 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
         self._P_g = -1
         self._A_g = -1
         self._to_holdback_dict: dict[str, list[str, list[str], float]] = {}
+        self._to_holdback_dict_lock = threading.Lock()
         self._to_holdback_queue: list[list[tuple[int, str], str, int]] = []
         self._produce_channel = Channel()
         self._to_lock = threading.Lock()
@@ -43,21 +44,22 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
     def _check_holdback_timestamps(self):
         timeout = self._configuration.get_timeout()
         while True:
-            time.sleep(5*self._configuration.get_heartbeat_interval())
-            ts = time.time_ns() / 10 ** 9
-            for key in self._to_holdback_dict:
-                entry = self._to_holdback_dict[key]
-                if ts - entry[2] > timeout:
-                    for server_id in self._group_view.servers:
-                        if (
-                            server_id not in entry[1]
-                            and not self._group_view.check_if_server_is_inactive(server_id)
-                            and not server_id in self._halting_servers
-                        ):
-                            suspect_msg = GroupViewSuspect.initFromData(server_id, key)
-                            suspect_msg.encode()
-                            self.__debug("TO-Multicast: Suspect for timeout on proposal", server_id)
-                            self.send(suspect_msg)
+            time.sleep(5 * self._configuration.get_heartbeat_interval())
+            with self._to_holdback_dict_lock:
+                ts = time.time_ns() / 10 ** 9
+                for key in self._to_holdback_dict:
+                    entry = self._to_holdback_dict[key]
+                    if ts - entry[2] > timeout:
+                        for server_id in self._group_view.servers:
+                            if (
+                                server_id not in entry[1]
+                                and not self._group_view.check_if_server_is_inactive(server_id)
+                                and not server_id in self._halting_servers
+                            ):
+                                suspect_msg = GroupViewSuspect.initFromData(server_id, key)
+                                suspect_msg.encode()
+                                self.__debug("TO-Multicast: Suspect for timeout on proposal", server_id, ts, entry[2])
+                                self.send(suspect_msg)
 
     def _co_deliver(self, data, identifier, seqno):
         self.__debug("CO-deliver", data)
@@ -86,8 +88,6 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
     def _handle_to_seqno_proposal(self, data, identifier):
         message = TotalOrderProposal.initFromJSON(data)
         message.decode()
-
-        print(self._to_holdback_queue)
 
         entry = None
         for e in self._to_holdback_queue:
@@ -123,7 +123,8 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
             if entry[2] == N:
                 entry = self._to_holdback_queue.pop(0)
                 self._to_deliver(self._to_holdback_dict[entry[1]][0])
-                del self._to_holdback_dict[entry[1]]
+                with self._to_holdback_dict_lock:
+                    del self._to_holdback_dict[entry[1]]
             else:
                 break
 
@@ -144,7 +145,7 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
             f = int(N / 4)
 
             if len(self._suspended_dict[(suspect_msg.identifier, suspect_msg.topic)]) > f:
-                if not self._group_view.check_if_server_is_inactive(suspect_msg.identifier):
+                if not self._group_view.check_if_server_is_suspended(suspect_msg.identifier):
                     self.__debug('TotalOrdering: Suspending "{}"'.format(suspect_msg.identifier))
                     self._group_view.suspend_server(suspect_msg.identifier)
 
@@ -169,15 +170,38 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
                         return
 
                 # send commence message
-                print("Send Commence Message")
                 commence_msg = CommenceMessage.initFromData(self._group_view.identifier)
                 commence_msg.encode()
 
                 self._group_view.wait_till_ready_to_join()
                 self._group_view.mark_server_as_joined(self._group_view.identifier)
+                self._group_view.flag_I_am_added()
+                with self._to_holdback_dict_lock:
+                    ts = time.time_ns() / 10 ** 9
+                    for key in self._to_holdback_dict:
+                        self._to_holdback_dict[key][2] = ts
                 self._halting_servers = {}
                 self._response_channel.set_trash_flag(False)
                 self._response_channel.produce((commence_msg.json_data, True))
+
+        elif (
+            self._group_view.identifier in self._halting_servers
+            and self._group_view.check_if_server_is_suspended(
+                self._halting_servers[self._group_view.identifier]
+            )
+        ):
+            # joining server has failed to answer in time, resuming operation
+            self.__debug("Resuming normal operation")
+            self._group_view.mark_server_as_joined(
+                self._halting_servers[self._group_view.identifier]
+            )  # removes server from joining list
+            with self._to_holdback_dict_lock:
+                ts = time.time_ns() / 10 ** 9
+                for key in self._to_holdback_dict:
+                    self._to_holdback_dict[key][2] = ts
+            self._halting_servers = {}
+            self.continue_sending()
+            self._halting_semaphore.release()
 
     def _handle_commence_message(self, data):
         commence_msg = CommenceMessage.initFromJSON(data)
@@ -192,6 +216,11 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
             self.__debug("TO-Multicast: Commence message from", sender_id)
             self._group_view.mark_server_as_joined(sender_id)
             self.timer.cancel()
+            self.timer1.cancel()
+            with self._to_holdback_dict_lock:
+                ts = time.time_ns() / 10 ** 9
+                for key in self._to_holdback_dict:
+                    self._to_holdback_dict[key][2] = ts
             self._halting_servers = {}
             self.continue_sending()
             self._halting_semaphore.release()
@@ -216,9 +245,10 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
             self.__debug("TO-Multicast: Suspect for sending after halting: ", sender_id)
             self._response_channel.produce((suspect_msg.json_data, True))
         else:
-            timestamp = time.time_ns() / 10 ** 9
             self._P_g = max(self._A_g, self._P_g) + 1
-            self._to_holdback_dict[message.msg_identifier] = [data, [self._identifier], timestamp]
+            with self._to_holdback_dict_lock:
+                timestamp = time.time_ns() / 10 ** 9
+                self._to_holdback_dict[message.msg_identifier] = [data, [self._identifier], timestamp]
             self._to_holdback_queue.append([(self._P_g, self._identifier), message.msg_identifier, 1])
             self._to_holdback_queue.sort(key=lambda entry: entry[0])
 
@@ -227,7 +257,7 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
 
             self._response_channel.produce((response_msg.json_data, False))
 
-    def timeout_handler(self, wait_until):
+    def __existing_server_timeout_handler(self, wait_until):
         for server_id in self._group_view.servers:
             if (
                 server_id not in self._group_view.joining_servers
@@ -237,7 +267,13 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
                     suspect_msg = GroupViewSuspect.initFromData(server_id, wait_until)
                     suspect_msg.encode()
                     self.__debug("TO-Multicast: Suspect for not halting: ", server_id)
-                    self._response_channel.produce((suspect_msg.json_data, True))
+                    self.send(suspect_msg, True)
+
+    def __new_server_timeout_handler(self, identification):
+        suspect_msg = GroupViewSuspect.initFromData(identification, identification)
+        suspect_msg.encode()
+        self.__debug("TO-Multicast: Suspect for not replying: ", identification)
+        self.send(suspect_msg, True)
 
     def halt_multicast(self, wait_until):
         self.__debug("TO-Multicast: Halting while waiting for", wait_until)
@@ -249,9 +285,15 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
         self.send(halt_msg, config)
 
         self.timer = threading.Timer(
-            self._configuration.get_timeout(), self.timeout_handler, args=(wait_until,)
+            self._configuration.get_timeout(), self.__existing_server_timeout_handler, args=(wait_until,)
         )
         self.timer.start()
+        self.timer1 = threading.Timer(
+            self._configuration.get_discovery_total_timeout(),
+            self.__new_server_timeout_handler,
+            args=(wait_until,),
+        )
+        self.timer1.start()
 
         self._halting_semaphore.acquire()
 

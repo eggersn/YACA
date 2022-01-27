@@ -92,6 +92,7 @@ class PhaseKing:
         i = 0
         while i < N:
             data = self._channel.consume(self._topic)
+            print("PhaseKing", data)
 
             message = Message.initFromJSON(data)
             message.decode()

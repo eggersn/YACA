@@ -4,6 +4,7 @@ import random
 import string
 import threading
 from nacl.signing import SigningKey, VerifyKey
+import os
 
 from src.core.utils.ip_addr import get_host_ip
 
@@ -25,6 +26,7 @@ class GroupView:
         self.sk: SigningKey
 
         self._ready_to_join_semaphore = threading.Semaphore(0)
+        self._added_semaphore = threading.Semaphore(0)
 
     def check_if_participant(self, id: str):
         return id in self.servers
@@ -42,6 +44,8 @@ class GroupView:
         self.__debug("GroupView: Suspend", identifier)
         if identifier in self.servers and identifier not in self.suspended_servers:
             self.suspended_servers.append(identifier)
+            if identifier == self.identifier:
+                os.system('kill %d' % os.getpid())
 
     def check_if_server_is_inactive(self, identifier):
         return identifier in self.suspended_servers or identifier in self.joining_servers
@@ -77,7 +81,7 @@ class GroupView:
             self.ports[identifier] = port
 
     def mark_server_as_joined(self, identifier):
-        self.__debug("GroupView: Active", identifier)
+        self.__debug("GroupView: Finished Joining", identifier)
         if identifier in self.joining_servers:
             self.joining_servers.remove(identifier)
 
@@ -86,6 +90,12 @@ class GroupView:
 
     def flag_ready_to_join(self):
         self._ready_to_join_semaphore.release()
+
+    def wait_till_I_am_added(self):
+        self._added_semaphore.acquire()
+
+    def flag_I_am_added(self):
+        self._added_semaphore.release()
 
     @classmethod
     def initFromFile(cls, file, verbose=False):

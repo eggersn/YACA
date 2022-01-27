@@ -88,7 +88,7 @@ class ReliableMulticast:
     def send(self, message: Message, config=False):
         if not message.is_decoded:
             message.decode()
-            
+
         if not self._suspend_multicast or config:
             self._R_g_lock.acquire()
             pb_message = PiggybackMessage.initFromMessage(message, self._identifier, self._S_p, self._R_g)
@@ -97,7 +97,6 @@ class ReliableMulticast:
             if not self._open:
                 pb_message.sign(self._signature)
 
-            print("SEND", pb_message.json_data)
             self._udp_sock.sendto(pb_message.json_data.encode(), (self._multicast_addr, self._multicast_port))
             response = self._deliver(pb_message.json_data, self._identifier, self._S_p)
             self._check_holdback_queue()
@@ -185,18 +184,18 @@ class ReliableMulticast:
                 msg.decode()
                 sender_id, _ = msg.get_signature()
 
-                if msg.verify_signature(self._signature, self._group_view):
-                    if msg.header == "HeartBeat":
-                        if not self._group_view.check_if_server_is_inactive(sender_id):
-                            self._receive_heartbeat(data, addr)
-                    elif msg.header == "NACK":
-                        if not self._group_view.check_if_server_is_suspended(sender_id):
-                            self._receive_nack(data, addr)
-                    else:
-                        if sock == self._udp_sock or not self._group_view.check_if_server_is_suspended(
-                            sender_id
-                        ):
-                            self._receive_pb_message(data, addr)
+                if msg.header == "HeartBeat":
+                    self._receive_heartbeat(data, addr)
+                else:
+                    if msg.verify_signature(self._signature, self._group_view):
+                        if msg.header == "NACK":
+                            if not self._group_view.check_if_server_is_suspended(sender_id):
+                                self._receive_nack(data, addr)
+                        else:
+                            if sock == self._udp_sock or not self._group_view.check_if_server_is_suspended(
+                                sender_id
+                            ):
+                                self._receive_pb_message(data, addr)
 
     def _listen_open(self):
         while not self.terminate:

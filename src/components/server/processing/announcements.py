@@ -42,7 +42,6 @@ class AnnouncementProcessing:
     def consumer(self):
         while True:
             data = self._channel.consume()
-            print("CONSUME", data)
 
             self._process_request(data)
 
@@ -85,7 +84,6 @@ class AnnouncementProcessing:
         response = JoinResponse.initFromData("waiting")
         success = self._udp_sender.send_udp_sync(response, (data[2], int(data[3])))
         if not success:
-            # TODO undo halt
             self._group_view.suspend_server(join_request.identifier)
             return
 

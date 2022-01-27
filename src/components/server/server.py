@@ -135,6 +135,7 @@ class Server:
                 self._announcement_multicast._halting_semaphore,
             )
             join_processing.start()
+            self._group_view.wait_till_I_am_added()
 
     def start(self):
         self._client_processing.start()
