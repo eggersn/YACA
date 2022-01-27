@@ -147,17 +147,19 @@ def main():
         os.remove(os.path.join("logs/", f))
 
     processes["server"] = []
-    config = Configuration()
-    for i in range(config.data["initial"]["instances"]):
-        p = multiprocessing.Process(
-            target=launch_server,
-            args=(
-                True,
-                i,
-            ),
-        )
-        p.start()
-        processes["server"].append(p)
+
+    if len(sys.argv) > 1 and sys.argv[1] == '-i':
+        config = Configuration()
+        for i in range(config.data["initial"]["instances"]):
+            p = multiprocessing.Process(
+                target=launch_server,
+                args=(
+                    True,
+                    i,
+                ),
+            )
+            p.start()
+            processes["server"].append(p)
 
     main_menu()
 
