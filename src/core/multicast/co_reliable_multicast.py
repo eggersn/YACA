@@ -24,12 +24,10 @@ class CausalOrderedReliableMulticast(ReliableMulticast):
         self._CO_R_g: dict[str, int] = {}
 
     def _deliver(self, data, identifier, seqno):
-        print("R-Multicast: Deliver", data)
         self._update_storage(data, identifier, seqno)
         self._co_consume(data, identifier, seqno)
 
     def _co_deliver(self, data, identifier, seqno):
-        print("CO-Multicast: Deliver", data)
         message = Message.initFromJSON(data)
         message.decode()
         self._channel.produce(data, message.get_topic())
@@ -81,15 +79,11 @@ class CausalOrderedReliableMulticast(ReliableMulticast):
         if not message.is_decoded:
             message.decode()
 
-        print("SEND1", message.json_data)
-
         if not self._suspend_multicast or config:
             with self._R_g_lock:
                 with self._co_lock:
                     pb_message = PiggybackMessage.initFromMessage(message, self._identifier, self._S_p, self._CO_R_g)
                     pb_message.encode()
-
-                print("SEND2", pb_message.json_data)
 
                 if not self._open:
                     pb_message.sign(self._signature)

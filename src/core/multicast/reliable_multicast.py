@@ -89,14 +89,10 @@ class ReliableMulticast:
         if not message.is_decoded:
             message.decode()
 
-        print("SEND1", message.json_data)
-
         if not self._suspend_multicast or config:
             with self._R_g_lock:
                 pb_message = PiggybackMessage.initFromMessage(message, self._identifier, self._S_p, self._R_g)
                 pb_message.encode()
-
-                print("SEND2", pb_message.json_data)
 
                 if not self._open:
                     pb_message.sign(self._signature)
