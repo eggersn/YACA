@@ -37,6 +37,7 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
         self._suspended_dict: dict[tuple[str, str], list[str]] = {}
         self._halting_servers: dict[str, str] = {}
         self._halting_semaphore = threading.Semaphore(0)
+        self._join_response_buffer: list[str] = []
 
         crash_fault_detection_thread = threading.Thread(target=self._check_holdback_timestamps)
         crash_fault_detection_thread.start()
@@ -89,12 +90,6 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
         message = TotalOrderProposal.initFromJSON(data)
         message.decode()
 
-        self.__debug(
-            "TO-Multicast: Received seqno proposal {} of server {} for message {}".format(
-                message.seqno, identifier, message.msg_identifier
-            )
-        )
-
         entry = None
         for e in self._to_holdback_queue:
             if e[1] == message.msg_identifier:
@@ -104,6 +99,15 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
             commited_servers = self._to_holdback_dict[entry[1]][1]
             commited_servers.append(identifier)
             entry[2] += 1
+            self.__debug(
+                "TO-Multicast: Received seqno proposal {} of server {} for message {} ({}/{})".format(
+                    message.seqno,
+                    identifier,
+                    message.msg_identifier,
+                    entry[2],
+                    self._group_view.get_number_of_unsuspended_servers(),
+                )
+            )
             if entry[0] < (message.seqno, identifier):
                 entry[0] = (message.seqno, identifier)
                 self._A_g = max(self._A_g, message.seqno)
@@ -199,6 +203,13 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
                 self._halting_servers = {}
                 self._response_channel.set_trash_flag(False)
                 self._response_channel.produce((commence_msg.json_data, True))
+                for proposal_json in self._join_response_buffer:
+                    proposal_msg = TotalOrderProposal.initFromJSON(proposal_json)
+                    proposal_msg.decode()
+
+                    if proposal_msg.msg_identifier in self._to_holdback_dict:
+                        self._response_channel.produce((proposal_json, False))
+                self._join_response_buffer = []
 
         elif (
             self._group_view.identifier in self._halting_servers
@@ -264,14 +275,17 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
             self._P_g = max(self._A_g, self._P_g) + 1
             with self._to_holdback_dict_lock:
                 timestamp = time.time_ns() / 10 ** 9
-                self._to_holdback_dict[message.msg_identifier] = [data, [self._identifier], timestamp]
-            self._to_holdback_queue.append([(self._P_g, self._identifier), message.msg_identifier, 1])
+                self._to_holdback_dict[message.msg_identifier] = [data, [], timestamp]
+            self._to_holdback_queue.append([(self._P_g, ""), message.msg_identifier, 0])
             self._to_holdback_queue.sort(key=lambda entry: entry[0])
 
             response_msg = TotalOrderProposal.initFromData(self._P_g, message.msg_identifier)
             response_msg.encode()
 
-            self._response_channel.produce((response_msg.json_data, False))
+            if self._group_view.identifier in self._group_view.joining_servers:
+                self._join_response_buffer.append(response_msg.json_data)
+            else:
+                self._response_channel.produce((response_msg.json_data, False))
 
     def __existing_server_timeout_handler(self, wait_until):
         for server_id in self._group_view.servers:

@@ -35,7 +35,7 @@
     "discovery": {
         "broadcast_port": 5039,
         "manager_timeout": 0.5,
-        "total_timeout": 5
+        "total_timeout": 10
     },
     "heartbeat": {
         "interval": 0.2

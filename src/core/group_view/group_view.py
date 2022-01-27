@@ -160,4 +160,4 @@ class GroupView:
 
     def __debug(self, *msgs):
         if self.__verbose:
-            print(*msgs)
+            print("\n",*msgs, "\n")
