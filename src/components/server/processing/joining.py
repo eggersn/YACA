@@ -38,16 +38,12 @@ class JoinProcessing:
         self.consumer()
 
     def consumer(self):
-        print("START CONSUMING")
         finished = False 
         while not finished:
             data = self._channel.consume()
-            print("CONSUME JOIN", data)
             finished = self._process_request(data)
 
-        print("Stop CONSUMING")
         self._group_view.flag_ready_to_join()
-        print("END CONSUMING")
 
     def _process_request(self, data):
         msg = Message.initFromJSON(data)
@@ -89,7 +85,5 @@ class JoinProcessing:
         if join_request.identifier == self._group_view.identifier:
             return True 
         else:
-            print("ACQUIRE")
             self._semaphore.acquire()
-            print("ACQUIRED")
             return False

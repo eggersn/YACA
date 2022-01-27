@@ -1,6 +1,6 @@
 {
     "initial": {
-        "instances": 2,
+        "instances": 4,
         "specs": [
             {
                 "id": "server1",
@@ -11,6 +11,16 @@
                 "id": "server2",
                 "ip_addr": "192.168.1.103",
                 "port": 23403
+            },
+            {
+                "id": "server3",
+                "ip_addr": "192.168.1.103",
+                "port": 22043
+            },
+            {
+                "id": "server4",
+                "ip_addr": "192.168.1.103",
+                "port": 21938
             }
         ],
         "path": "initial"

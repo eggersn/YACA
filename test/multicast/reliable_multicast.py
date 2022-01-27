@@ -13,7 +13,7 @@ from src.core.group_view.group_view import GroupView
 
 def consume(channel, group_view):
     seqno_dict = {}
-    for i in range(40):
+    for i in range(40000):
         data = channel.consume()
         message = Message.initFromJSON(data)
         message.decode()
@@ -39,7 +39,7 @@ def consume(channel, group_view):
                 print("FAILED: Process {1} expected ({2}, {3}) but got ({2}, {4})".format(group_view.identifier, msg_identifier, seqno_dict[msg_identifier], msg_value))
                 break 
 
-    if i == 39:
+    if i == 39999:
         print("SUCCESS: Process {}".format(group_view.identifier))
 
 def launch_process(i):
@@ -50,6 +50,7 @@ def launch_process(i):
 
     config = Configuration()
     files = os.listdir("config/" + config.data["initial"]["path"] + "/")
+    files.remove("global.json")
     file = "config/" + config.data["initial"]["path"] + "/" + files[i]
     group_view = GroupView.initFromFile(file)
 
@@ -64,8 +65,9 @@ def launch_process(i):
     consume_thread = threading.Thread(target=consume, args=(channel, group_view,))
     consume_thread.start()
 
-    for i in range(10):
+    for i in range(10000):
         message = Message.initFromData("Test", content={"identifier": group_view.identifier, "value": i})
+        message.encode()
         reliable_multicast.send(message)
         
         
@@ -76,7 +78,7 @@ if __name__ == "__main__":
         p.start()
         processes.append(p)
 
-    time.sleep(2)
+    time.sleep(60)
     for p in processes:
         p.terminate()
         p.join()

@@ -126,7 +126,7 @@ class Server:
         )
 
         if not initial:
-            self.__debug("Server: Start Consuming", self._group_view.identifier)
+            self.__debug("Server: Start consuming as", self._group_view.identifier)
             join_processing = JoinProcessing(
                 self._announcement_channel,
                 self._consensus_channel,

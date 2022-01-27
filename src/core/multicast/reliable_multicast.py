@@ -34,7 +34,7 @@ class ReliableMulticast:
         self._requested_messages: dict[str, tuple[int, int]] = {}
 
         self._holdback_queue_lock = threading.Lock()
-        self._R_g_lock = threading.Lock()
+        self._R_g_lock = threading.Semaphore()
 
         self._response_channel = Channel()
 
@@ -89,20 +89,25 @@ class ReliableMulticast:
         if not message.is_decoded:
             message.decode()
 
+        print("SEND1", message.json_data)
+
         if not self._suspend_multicast or config:
-            self._R_g_lock.acquire()
-            pb_message = PiggybackMessage.initFromMessage(message, self._identifier, self._S_p, self._R_g)
-            pb_message.encode()
+            with self._R_g_lock:
+                pb_message = PiggybackMessage.initFromMessage(message, self._identifier, self._S_p, self._R_g)
+                pb_message.encode()
 
-            if not self._open:
-                pb_message.sign(self._signature)
+                print("SEND2", pb_message.json_data)
 
-            self._udp_sock.sendto(pb_message.json_data.encode(), (self._multicast_addr, self._multicast_port))
-            response = self._deliver(pb_message.json_data, self._identifier, self._S_p)
-            self._check_holdback_queue()
+                if not self._open:
+                    pb_message.sign(self._signature)
 
-            self._S_p += 1
-            self._R_g_lock.release()
+                self._udp_sock.sendto(
+                    pb_message.json_data.encode(), (self._multicast_addr, self._multicast_port)
+                )
+                response = self._deliver(pb_message.json_data, self._identifier, self._S_p)
+                self._check_holdback_queue()
+
+                self._S_p += 1
 
             if not self._response_channel.is_empty():
                 response, config = self._response_channel.consume()
@@ -112,7 +117,6 @@ class ReliableMulticast:
             if not message.is_encoded:
                 message.encode()
             self._response_channel.produce((message.json_data, False))
-
 
     def _send_unicast(self, message: Message, addr: tuple[str, int]):
         if not message.is_encoded:
@@ -155,7 +159,7 @@ class ReliableMulticast:
 
     def disable_responses(self):
         self._response_channel.set_trash_flag(True)
-    
+
     def enable_responses(self):
         self._response_channel.set_trash_flag(False)
 
@@ -237,8 +241,8 @@ class ReliableMulticast:
     def _receive_heartbeat(self, data, addr):
         heartbeat = HeartBeat.initFromJSON(data)
         heartbeat.decode()
-        with self._R_g_lock:
-            self._handle_acks(heartbeat.acks, addr, {})
+
+        self._handle_acks(heartbeat.acks, addr, {})
 
     def _receive_nack(self, data, addr):
         nack = NegativeAcknowledgement.initFromJSON(data)
@@ -270,7 +274,6 @@ class ReliableMulticast:
         nack_messages = {}
         check_responses = False
 
-        self._R_g_lock.acquire()
         if pb_message.identifier not in self._storage:
             self._storage[pb_message.identifier] = []
             self._R_g[pb_message.identifier] = -1
@@ -310,8 +313,6 @@ class ReliableMulticast:
                     nack_messages[pb_message.identifier] = missing_messages
 
         self._handle_acks(pb_message.acks, addr, nack_messages)
-
-        self._R_g_lock.release()
 
         if check_responses:
             if not self._response_channel.is_empty():
@@ -406,4 +407,3 @@ class ReliableMulticast:
 
     def continue_sending(self):
         self._suspend_multicast = False
-

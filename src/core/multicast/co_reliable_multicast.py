@@ -24,10 +24,12 @@ class CausalOrderedReliableMulticast(ReliableMulticast):
         self._CO_R_g: dict[str, int] = {}
 
     def _deliver(self, data, identifier, seqno):
+        print("R-Multicast: Deliver", data)
         self._update_storage(data, identifier, seqno)
         self._co_consume(data, identifier, seqno)
 
     def _co_deliver(self, data, identifier, seqno):
+        print("CO-Multicast: Deliver", data)
         message = Message.initFromJSON(data)
         message.decode()
         self._channel.produce(data, message.get_topic())
@@ -51,11 +53,7 @@ class CausalOrderedReliableMulticast(ReliableMulticast):
         for identifier in seqno_dict:
             if identifier not in self._CO_R_g:
                 self._CO_R_g[identifier] = -1
-            if identifier == self._identifier:
-                if seqno_dict[identifier] > self._S_p:
-                    return False
-            else:
-                if seqno_dict[identifier] > self._CO_R_g[identifier]:
+            if seqno_dict[identifier] > self._CO_R_g[identifier]:
                     return False
 
         return True
@@ -78,3 +76,37 @@ class CausalOrderedReliableMulticast(ReliableMulticast):
                     change = True
                 else:
                     k += 1
+
+    def send(self, message: Message, config=False):
+        if not message.is_decoded:
+            message.decode()
+
+        print("SEND1", message.json_data)
+
+        if not self._suspend_multicast or config:
+            with self._R_g_lock:
+                with self._co_lock:
+                    pb_message = PiggybackMessage.initFromMessage(message, self._identifier, self._S_p, self._CO_R_g)
+                    pb_message.encode()
+
+                print("SEND2", pb_message.json_data)
+
+                if not self._open:
+                    pb_message.sign(self._signature)
+
+                self._udp_sock.sendto(
+                    pb_message.json_data.encode(), (self._multicast_addr, self._multicast_port)
+                )
+                response = self._deliver(pb_message.json_data, self._identifier, self._S_p)
+                self._check_holdback_queue()
+
+                self._S_p += 1
+
+            if not self._response_channel.is_empty():
+                response, config = self._response_channel.consume()
+                response_msg = Message.initFromJSON(response)
+                self.send(response_msg, config)
+        else:
+            if not message.is_encoded:
+                message.encode()
+            self._response_channel.produce((message.json_data, False))

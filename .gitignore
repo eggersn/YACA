@@ -1,4 +1,3 @@
 .vscode
 logs
 *pycache*
-config/initial/*

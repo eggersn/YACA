@@ -58,15 +58,15 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
                             ):
                                 suspect_msg = GroupViewSuspect.initFromData(server_id, key)
                                 suspect_msg.encode()
-                                self.__debug("TO-Multicast: Suspect for timeout on proposal", server_id, ts, entry[2])
+                                self.__debug("TO-Multicast: Suspect for timeout on proposal")
                                 self.send(suspect_msg)
 
     def _co_deliver(self, data, identifier, seqno):
-        self.__debug("CO-deliver", data)
+        self.__debug("CO-Multicast: Deliver", data)
         self._to_consume(data, identifier, seqno)
 
     def _to_deliver(self, data):
-        self.__debug("TO-deliver", data)
+        self.__debug("TO-Multicast: Deliver", data)
         self._channel.produce(data)
 
     def _to_consume(self, data, identifier, seqno):
@@ -88,6 +88,12 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
     def _handle_to_seqno_proposal(self, data, identifier):
         message = TotalOrderProposal.initFromJSON(data)
         message.decode()
+
+        self.__debug(
+            "TO-Multicast: Received seqno proposal {} of server {} for message {}".format(
+                message.seqno, identifier, message.msg_identifier
+            )
+        )
 
         entry = None
         for e in self._to_holdback_queue:
@@ -139,6 +145,11 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
                 self._suspended_dict[(suspect_msg.identifier, suspect_msg.topic)] = []
 
             if sender_id not in self._suspended_dict[(suspect_msg.identifier, suspect_msg.topic)]:
+                self.__debug(
+                    "TO-Multicast: Received suspect message for {} of server {} (reason: {})".format(
+                        suspect_msg.identifier, sender_id, suspect_msg.topic
+                    )
+                )
                 self._suspended_dict[(suspect_msg.identifier, suspect_msg.topic)].append(sender_id)
 
             N = self._group_view.get_number_of_unsuspended_servers()
@@ -158,6 +169,11 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
 
         sender_id, _ = halt_msg.get_signature()
         self._halting_servers[sender_id] = halt_msg.wait_until
+        self.__debug(
+            "TO-Multicast: Received halt message of server {} (wait until: {})".format(
+                sender_id, halt_msg.wait_until
+            )
+        )
 
         self._check_hold_messages()
 
@@ -191,7 +207,7 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
             )
         ):
             # joining server has failed to answer in time, resuming operation
-            self.__debug("Resuming normal operation")
+            self.__debug("TO-Multicast: JOIN timeout, resuming normal operation")
             self._group_view.mark_server_as_joined(
                 self._halting_servers[self._group_view.identifier]
             )  # removes server from joining list
@@ -213,7 +229,7 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
             and self._group_view.identifier in self._halting_servers
             and self._halting_servers[self._group_view.identifier] == sender_id
         ):
-            self.__debug("TO-Multicast: Commence message from", sender_id)
+            self.__debug("TO-Multicast: Received commence message from", sender_id)
             self._group_view.mark_server_as_joined(sender_id)
             self.timer.cancel()
             self.timer1.cancel()
