@@ -68,7 +68,7 @@ class MaxPhaseKing:
             self.__send_suspect_message(sender_id, pk_message.topic, 0)
         return False
 
-    def check_timeouts(self, halting_servers):
+    def check_timeouts(self, halting_servers, send):
         timeout = self._configuration.get_timeout()
         ts = time.time_ns() / 10 ** 9
         for topic in self._pk_storage:
@@ -82,14 +82,36 @@ class MaxPhaseKing:
                                 and server not in self._pk_storage[topic][1]
                                 and server not in halting_servers
                             ):
-                                self.__send_suspect_message(server, topic, 1)
+                                suspect_msg = GroupViewSuspect.initFromData(server, "PK-1: {}".format(topic))
+                                suspect_msg.encode()
+                                send(suspect_msg)
                     else:
                         # round 2, suspect phase king
                         phase_king = self._group_view.get_next_active_after_ith_server(
                             self._pk_storage[topic][0][0]
                         )
                         if phase_king not in halting_servers:
-                            self.__send_suspect_message(phase_king, topic, 2)
+                            suspect_msg = GroupViewSuspect.initFromData(phase_king, "PK-2: {}".format(topic))
+                            suspect_msg.encode()
+                            send(suspect_msg)        
+
+    def handle_round1_suspension(self, topic:str):
+        topic = topic.split(": ")[1]  
+        self._check_if_round1_finished(self._pk_storage[topic][0][0], topic)               
+
+    def handle_round2_suspension(self, topic:str):
+        topic = topic.split(": ")[1]
+        ts = time.time_ns() / 10 ** 9
+        self._pk_storage[topic][5] = ts
+
+        if self._group_view.identifier == self._group_view.get_next_active_after_ith_server(self._pk_storage[topic][0][0]):
+            # I am the phase king
+            N = self._group_view.get_number_of_unsuspended_servers()
+            tiebreaker = self._pk_storage[topic][2] if self._pk_storage[topic][4] <= N / 2 else self._pk_storage[topic][3]
+            pk_message = PhaseKingMessage.initFromData(tiebreaker, self._pk_storage[topic][0][0], 2, topic)
+            pk_message.encode()
+            self._response_channel.produce((pk_message.json_data, False), trash=True)
+
 
     def _process_round1_message(self, value: int, phase: int, topic: str, sender_id: str):
         if topic not in self._pk_storage:
@@ -169,6 +191,7 @@ class MaxPhaseKing:
     def __send_suspect_message(self, identifier: str, topic: str, round: int):
         suspect_msg = GroupViewSuspect.initFromData(identifier, "PK-{}: {}".format(round, topic))
         suspect_msg.encode()
+
         self._response_channel.produce((suspect_msg.json_data, False), trash=True)
 
     def __debug(self, *msgs):

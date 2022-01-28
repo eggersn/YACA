@@ -66,9 +66,10 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
                                 suspect_msg.encode()
                                 self.__debug("TO-Multicast: Suspect for timeout on proposal")
                                 self.send(suspect_msg)
-            self._max_phase_king.check_timeouts(self._halting_servers)
+            self._max_phase_king.check_timeouts(self._halting_servers, self.send)
 
     def _co_deliver(self, data, identifier, seqno):
+        self.__debug("CO-Multicast: Deliver", data)
         self._to_consume(data, identifier, seqno)
 
     def _to_deliver(self, data):
@@ -178,6 +179,11 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
                     self._check_to_holdback_queue()
                     self._check_hold_messages()
 
+                if "PK-1:" in suspect_msg.topic:  # timeout of some server in round1 of maxphaseking
+                    self._max_phase_king.handle_round1_suspension(suspect_msg.topic)
+                if "PK-2:" in suspect_msg.topic:  # timeout of phaseking
+                    self._max_phase_king.handle_round2_suspension(suspect_msg.topic)
+
     def _handle_halt_message(self, data):
         halt_msg = HaltMessage.initFromJSON(data)
         halt_msg.decode()
@@ -242,6 +248,7 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
             self._halting_servers = {}
             self.continue_sending()
             self._halting_semaphore.release()
+            self._check_to_holdback_queue()
 
     def _handle_commence_message(self, data):
         commence_msg = CommenceMessage.initFromJSON(data)

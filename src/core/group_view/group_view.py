@@ -44,6 +44,7 @@ class GroupView:
         k = 0
         server = self.servers[i+k]
         while self.check_if_server_is_inactive(server):
+            k+=1
             server = self.servers[i+k]
         return server
 
