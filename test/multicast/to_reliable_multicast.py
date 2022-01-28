@@ -49,6 +49,7 @@ def launch_process(i):
 
     config = Configuration()
     files = os.listdir("config/" + config.data["initial"]["path"] + "/")
+    files.remove("global.json")
     files.sort()
     file = "config/" + config.data["initial"]["path"] + "/" + files[i]
     group_view = GroupView.initFromFile(file)

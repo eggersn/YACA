@@ -1,5 +1,6 @@
 import threading
 import time
+from src.core.consensus.max_phase_king import MaxPhaseKing
 from src.core.utils.configuration import Configuration
 from src.core.utils.channel import Channel
 from src.protocol.multicast.to_message import TotalOrderMessage
@@ -39,6 +40,10 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
         self._halting_semaphore = threading.Semaphore(0)
         self._join_response_buffer: list[str] = []
 
+        self._max_phase_king = MaxPhaseKing(
+            self._response_channel, self._to_holdback_queue, self._group_view, self._configuration, verbose
+        )
+
         crash_fault_detection_thread = threading.Thread(target=self._check_holdback_timestamps)
         crash_fault_detection_thread.start()
 
@@ -61,9 +66,9 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
                                 suspect_msg.encode()
                                 self.__debug("TO-Multicast: Suspect for timeout on proposal")
                                 self.send(suspect_msg)
+            self._max_phase_king.check_timeouts(self._halting_servers)
 
     def _co_deliver(self, data, identifier, seqno):
-        self.__debug("CO-Multicast: Deliver", data)
         self._to_consume(data, identifier, seqno)
 
     def _to_deliver(self, data):
@@ -83,6 +88,9 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
                 self._handle_halt_message(data)
             elif message.header == "Commence Message":
                 self._handle_commence_message(data)
+            elif message.header == "Phase King: Message":
+                if self._max_phase_king.process_pk_message(data):
+                    self._check_to_holdback_queue()
             else:
                 self._handle_to_message(data)
 
@@ -130,11 +138,14 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
                 else:
                     k += 1
 
-            if entry[2] == N:
+            if entry[2] == N and entry[3]:
                 entry = self._to_holdback_queue.pop(0)
                 self._to_deliver(self._to_holdback_dict[entry[1]][0])
                 with self._to_holdback_dict_lock:
                     del self._to_holdback_dict[entry[1]]
+            elif entry[2] == N:
+                self._max_phase_king.start_new_execution(entry[0], entry[1])
+                break
             else:
                 break
 
@@ -193,6 +204,7 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
                 commence_msg = CommenceMessage.initFromData(self._group_view.identifier)
                 commence_msg.encode()
 
+                self._max_phase_king.reset()
                 self._group_view.wait_till_ready_to_join()
                 self._group_view.mark_server_as_joined(self._group_view.identifier)
                 self._group_view.flag_I_am_added()
@@ -219,6 +231,7 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
         ):
             # joining server has failed to answer in time, resuming operation
             self.__debug("TO-Multicast: JOIN timeout, resuming normal operation")
+            self._max_phase_king.reset()
             self._group_view.mark_server_as_joined(
                 self._halting_servers[self._group_view.identifier]
             )  # removes server from joining list
@@ -241,6 +254,7 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
             and self._halting_servers[self._group_view.identifier] == sender_id
         ):
             self.__debug("TO-Multicast: Received commence message from", sender_id)
+            self._max_phase_king.reset()
             self._group_view.mark_server_as_joined(sender_id)
             self.timer.cancel()
             self.timer1.cancel()
@@ -257,6 +271,7 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
             and self._group_view.identifier in self._group_view.joining_servers
         ):
             self.__debug("TO-Multicast: Commence message from", sender_id)
+            self._max_phase_king.reset()
             self._group_view.mark_server_as_joined(sender_id)
             self._halting_servers = {}
             self._halting_semaphore.release()
@@ -276,7 +291,7 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
             with self._to_holdback_dict_lock:
                 timestamp = time.time_ns() / 10 ** 9
                 self._to_holdback_dict[message.msg_identifier] = [data, [], timestamp]
-            self._to_holdback_queue.append([(self._P_g, ""), message.msg_identifier, 0])
+            self._to_holdback_queue.append([(self._P_g, ""), message.msg_identifier, 0, False])
             self._to_holdback_queue.sort(key=lambda entry: entry[0])
 
             response_msg = TotalOrderProposal.initFromData(self._P_g, message.msg_identifier)

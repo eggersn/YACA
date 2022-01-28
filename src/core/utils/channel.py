@@ -16,16 +16,16 @@ class Channel:
                 self._locks[topic] = threading.Lock()
                 self._semaphores[topic] = threading.Semaphore(0)
 
-    def produce(self, msg, topic=""):
+    def produce(self, msg, topic="", trash=False):
         if not self._trash:
             with self._locks[topic]:
-                self._topic_queues[topic].append(msg)
+                self._topic_queues[topic].append((msg, trash))
                 self._semaphores[topic].release()
 
     def consume(self, topic=""):
         self._semaphores[topic].acquire()
         with self._locks[topic]:
-            msg = self._topic_queues[topic].pop(0)
+            msg = self._topic_queues[topic].pop(0)[0]
         return msg
 
     def is_empty(self, topic=""):
@@ -35,3 +35,5 @@ class Channel:
 
     def set_trash_flag(self, flag : bool):
         self._trash = flag
+
+

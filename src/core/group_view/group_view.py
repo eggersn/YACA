@@ -40,6 +40,13 @@ class GroupView:
     def get_ith_server(self, i):
         return self.servers[i]
 
+    def get_next_active_after_ith_server(self, i):
+        k = 0
+        server = self.servers[i+k]
+        while self.check_if_server_is_inactive(server):
+            server = self.servers[i+k]
+        return server
+
     def suspend_server(self, identifier):
         self.__debug("GroupView: Suspend", identifier)
         if identifier in self.servers and identifier not in self.suspended_servers:

@@ -1,233 +1,175 @@
-import threading
+import math
+import time
 
 from src.core.utils.configuration import Configuration
 from src.core.group_view.group_view import GroupView
 from src.core.utils.channel import Channel
-from src.core.multicast.co_reliable_multicast import CausalOrderedReliableMulticast
 from src.protocol.consensus.pk_message import PhaseKingMessage, Message
 from src.protocol.consensus.suspect import GroupViewSuspect
 from collections import Counter
 from src.core.consensus.phase_king import PhaseKing
 
 
-class MaxPhaseKing(PhaseKing):
+class MaxPhaseKing:
     def __init__(
         self,
-        consensus_channel: Channel,
-        consensus_multicast: CausalOrderedReliableMulticast,
+        response_channel: Channel,
+        to_holdback_queue: list[list[tuple[int, str], str, int, bool]],
         group_view: GroupView,
         configuration: Configuration,
-        max = max,
-        topic="",
         verbose=False,
     ):
-        super().__init__(consensus_channel, consensus_multicast, group_view, configuration, topic, verbose)
-        self._max = max
+        self._response_channel = response_channel
+        self._to_holdback_queue = to_holdback_queue
+        self._group_view = group_view
+        self._configuration = configuration
         self.__verbose = verbose
 
+        self._pk_storage: dict[
+            str, list[tuple[int, int], dict[str, int], int, int, int, float]
+        ] = {}  # pk_storage[msg_id] = [(phase, round), values, majority, count, max]
 
-    def consensus(self, value):
-        # Importantly, we require that all processes have the same value for N.
-        # This is achieved by the fact, that we execute this algorithm solely after delivering
-        # a message via TO-multicast (which handles coordination and in particular JOIN messages)
-        N = self._group_view.get_number_of_servers()
-        f = int(N / 4)
-        offset = 0
+    def start_new_execution(self, initial_value: int, msg_id: str):
+        if msg_id not in self._pk_storage:
+            ts = time.time_ns() / 10 ** 9
+            self._pk_storage[msg_id] = [
+                (0, 1),
+                {},
+                -1,
+                -1,
+                -1,
+                ts,
+            ]
+        else:
+            return
 
-        for phase in range(f + 1):
-            self.__debug(
-                "PhaseKing (Phase {}): King {}".format(phase, self._group_view.get_ith_server(phase + offset))
-            )
-
-            majority_value, majority_count, max_value = self._round1(value, phase, N - f)
-            new_value, offset = self._round2(majority_value, majority_count, max_value, phase, N - f, offset)
-            value = max(new_value, value)
-            self.__debug('PhaseKing (Phase {}): Result "{}"'.format(phase, value))
-
-        return value
-
-    """
-    In Round1 of the Phase-King algorithm, all (unsuspended) participants send their current value to all other participants
-    using causal ordered reliable multicast. Each process starts a local timer for detecting crash / omission faults. In case of 
-    such a timeout, the process multicasts a SUSPEND message. If a process collects at least N-f suspend messages of other processes
-    he commits the suspend message to group_view. This entails that messages of the suspended process will be ignored in the future. 
-    """
-
-    def _round1(self, value: str, phase: int, no_of_correct_processes: int):
-        # on timeout, send suspect message for all servers that did not respond
-        def timeout_handler(sender_ids):
-            for server_id in self._group_view.servers:
-                if server_id not in sender_ids and not self._group_view.check_if_server_is_inactive(
-                    server_id
-                ):
-                    suspect_msg = GroupViewSuspect.initFromData(server_id, self._topic)
-                    suspect_msg.encode()
-
-                    self._multicast.send(suspect_msg)
-
-        self.__debug(
-            'PhaseKing ({}Phase {} - Round 1): Initial value "{}"'.format(
-                ((self._topic + "; ")) if self._topic is not None else "", phase, value
-            )
-        )
-
-        # send own value
-        pk_message = PhaseKingMessage.initFromData(value, phase, 1, self._topic)
+        pk_message = PhaseKingMessage.initFromData(initial_value, 0, 1, msg_id)
         pk_message.encode()
 
-        self._multicast.send(pk_message)
+        self.__debug("MaxPhaseKing: Starting {} with initial value {}".format(msg_id, initial_value))
+        self._response_channel.produce((pk_message.json_data, False), trash=True)
 
-        # wait for N responses
+    def reset(self):
+        self._pk_storage = {}
+
+    def process_pk_message(self, data):
+        pk_message = PhaseKingMessage.initFromJSON(data)
+        pk_message.decode()
+
+        sender_id, _ = pk_message.get_signature()
+
+        if pk_message.round == 1:
+            self._process_round1_message(pk_message.value, pk_message.phase, pk_message.topic, sender_id)
+        elif pk_message.round == 2:
+            return self._process_round2_message(
+                pk_message.value, pk_message.phase, pk_message.topic, sender_id
+            )
+        else:
+            self.__send_suspect_message(sender_id, pk_message.topic, 0)
+        return False
+
+    def check_timeouts(self, halting_servers):
+        timeout = self._configuration.get_timeout()
+        ts = time.time_ns() / 10 ** 9
+        for topic in self._pk_storage:
+            if len(self._pk_storage[topic]) == 6:
+                if ts - self._pk_storage[topic][5] > timeout:
+                    if self._pk_storage[topic][0][1] == 1:
+                        # round 1, suspect all servers that did not answer yet
+                        for server in self._group_view.servers:
+                            if (
+                                not self._group_view.check_if_server_is_inactive(server)
+                                and server not in self._pk_storage[topic][1]
+                                and server not in halting_servers
+                            ):
+                                self.__send_suspect_message(server, topic, 1)
+                    else:
+                        # round 2, suspect phase king
+                        phase_king = self._group_view.get_next_active_after_ith_server(
+                            self._pk_storage[topic][0][0]
+                        )
+                        if phase_king not in halting_servers:
+                            self.__send_suspect_message(phase_king, topic, 2)
+
+    def _process_round1_message(self, value: int, phase: int, topic: str, sender_id: str):
+        if topic not in self._pk_storage:
+            if phase == 0:
+                self._pk_storage[topic] = [(0, 1), {sender_id: value}, -1, -1, -1]
+        else:
+            if (phase, 1) == self._pk_storage[topic][0]:
+                self._pk_storage[topic][1][sender_id] = value
+                self._check_if_round1_finished(phase, topic)
+
+    def _check_if_round1_finished(self, phase: int, topic: str):
         N = self._group_view.get_number_of_unsuspended_servers()
-
-        values = []
-        sender_ids = []
-        suspected_servers = {}
-
-        # start timer for crash fault detection
-        timer = threading.Timer(self._configuration.get_timeout(), timeout_handler, args=(sender_ids,))
-        timer.start()
-
-        i = 0
-        while i < N:
-            data = self._channel.consume(self._topic)
-
-            message = Message.initFromJSON(data)
-            message.decode()
-
-            sender_id, _ = message.get_signature()
-            if not self._group_view.check_if_server_is_inactive(sender_id):
-                if message.header == "Phase King: Message":
-                    i = self._handle_round1_phaseking_msg(data, sender_ids, values, phase, i)
-
-                elif message.header == "View: Suspect":
-                    N = self._handle_round1_suspect_msg(
-                        data,
-                        suspected_servers,
-                        sender_ids,
-                        values,
-                        phase,
-                        N,
-                        no_of_correct_processes,
-                    )
-
-        # cancel timeout timer
-        timer.cancel()
-
-        self.__debug(
-            'PhaseKing ({}Phase {} - Round 1): Results "{}" from "{}"'.format(
-                (self._topic + "; ") if self._topic != "" else "", phase, values, sender_ids
-            )
-        )
-
-        # determine majority value and return
-        c = Counter(values)
-        (majority_value, majority_count) = c.most_common()[0]
-        max_value = self._max(values)
-
-        if majority_count <= N / 2:
-            majority_value = ""
-            majority_count = 0
-
-        self.__debug(
-            'PhaseKing ({}Phase {} - Round 1): New value "{}" received from "{}" processes'.format(
-                (self._topic + "; ") if self._topic != "" else "", phase, majority_value, majority_count
-            )
-        )
-
-        return majority_value, majority_count, max_value
-
-    """
-    In Round2 of the Phase-King algorithm, the processes await the tiebreaker value from the phase king. 
-    Similar to Round1, the processes start a local timer to detect crash / omission faults of the phase king. 
-    If a phase king is suspended, the process with the next higher id is selected - until there exists a correct phase king. 
-    """
-
-    def _round2(self, majority_value, majority_count, max_value, phase, no_of_correct_processes, offset):
-        def timeout_handler(i):
-            phase_king = self._group_view.get_ith_server(i)
-            suspect_msg = GroupViewSuspect.initFromData(phase_king, self._topic)
-            suspect_msg.encode()
-
-            self._multicast.send(suspect_msg)
-
-        tiebreaker = None
-
-        while tiebreaker is None:
-            phase_king = self._group_view.get_ith_server(phase + offset)
-            while self._group_view.check_if_server_is_inactive(phase_king):
-                offset += 1
-                phase_king = self._group_view.get_ith_server(phase + offset)
-
-            suspecting_servers = []
+        if len(self._pk_storage[topic][1].keys()) == N:
+            # all messages are received, continuing to round2
+            c = Counter(["{}#{}".format(val[0], val[1]) for val in self._pk_storage[topic][1].values()])
+            (majority_value, majority_count) = c.most_common()[0]
+            majority_value = [int(majority_value.split("#")[0]), majority_value.split("#")[1]]
+            max_value = max(self._pk_storage[topic][1].values())
+            self._pk_storage[topic][0] = (phase, 2)
+            self._pk_storage[topic][2] = max_value
+            self._pk_storage[topic][3] = majority_value
+            self._pk_storage[topic][4] = majority_count
+            ts = time.time_ns() / 10 ** 9
+            self._pk_storage[topic][4] = ts
 
             self.__debug(
-                'PhaseKing ({}Phase {} - Round 2): Waiting for "{}"'.format(
-                    (self._topic + "; ") if self._topic != "" else "", phase, phase_king
+                "MaxPhaseKing [{}](Phase {} - Round 1): Max {}, Maj {}, Count {}".format(
+                    topic, phase, max_value, majority_value, majority_count
                 )
             )
 
-            timer = None
-            # check if this process is the phase king
-            if phase_king == self._group_view.identifier:
-                pk_message = PhaseKingMessage.initFromData(max_value, phase, 2, self._topic)
+            if self._group_view.identifier == self._group_view.get_next_active_after_ith_server(phase):
+                # I am the phase king
+                tiebreaker = max_value if majority_count <= N / 2 else majority_value
+                pk_message = PhaseKingMessage.initFromData(tiebreaker, phase, 2, topic)
                 pk_message.encode()
-                self._multicast.send(pk_message)
+                self._response_channel.produce((pk_message.json_data, False), trash=True)
 
-            else:
-                # start timer for crash fault detection of phase king
-                timer = threading.Timer(
-                    self._configuration.get_timeout(),
-                    timeout_handler,
-                    args=(phase + offset,),
-                )
-                timer.start()
+    def _process_round2_message(self, tiebreaker: int, phase: int, topic: str, sender_id: str):
+        if topic not in self._pk_storage or sender_id != self._group_view.get_next_active_after_ith_server(
+            phase or self._pk_storage[topic][0] != (phase, 2)
+        ):
+            return
 
-            # wait for phase king message
-            while True:
-                data = self._channel.consume(self._topic)
+        N = self._group_view.get_number_of_unsuspended_servers()
+        f = math.ceil(N / 4) - 1  # assuming worst-case
 
-                message = Message.initFromJSON(data)
-                message.decode()
+        if self._pk_storage[topic][4] > N / 2 + f:
+            value = self._pk_storage[topic][3]  # update value with majority
+        else:
+            value = max(
+                self._pk_storage[topic][1][self._group_view.identifier], tiebreaker
+            )  # update value with max of own and tiebreaker value
 
-                sender_id, _ = message.get_signature()
-                if not self._group_view.check_if_server_is_inactive(sender_id):
-                    if message.header == "Phase King: Message":
-                        pk_message = PhaseKingMessage.initFromJSON(data)
-                        pk_message.decode()
-                        sender_id, _ = pk_message.get_signature()
+        if phase < f:
+            self.__debug("MaxPhaseKing [{}](Phase {} - Round 2): New value {}".format(topic, phase, value))
+            # proceed with next phase
+            ts = time.time_ns() / 10 ** 9
+            self._pk_storage[topic] = [(phase + 1, 1), {}, -1, -1, -1, ts]
+            pk_message = PhaseKingMessage.initFromData(value, phase + 1, 1, topic)
+            pk_message.encode()
+            self._response_channel.produce((pk_message.json_data, False), trash=True)
+        else:
+            self.__debug("MaxPhaseKing [{}]: Result {}".format(topic, value))
+            k = 0
+            while k < len(self._to_holdback_queue):
+                if self._to_holdback_queue[k][1] == topic:
+                    self._to_holdback_queue[k][0] = tuple(value)
+                    self._to_holdback_queue[k][3] = True
+                    self._to_holdback_queue.sort(key=lambda entry: entry[0])
+                    return True
+                else:
+                    k += 1
 
-                        if pk_message.phase == phase and pk_message.round == 2 and sender_id == phase_king:
-                            tiebreaker = pk_message.value
-                            break
+        return False
 
-                    elif message.header == "View: Suspect":
-                        suspect_msg = GroupViewSuspect.initFromJSON(data)
-                        suspect_msg.decode()
-                        sender_id, _ = suspect_msg.get_signature()
-
-                        if suspect_msg.identifier == phase_king and sender_id not in suspecting_servers:
-                            suspecting_servers.append(sender_id)
-
-                            if len(suspecting_servers) >= no_of_correct_processes:
-                                if not self._group_view.check_if_server_is_inactive(phase_king):
-                                    offset += 1
-                                    self.__debug(
-                                        'PhaseKing ({}Phase {} - Round 2): Suspending King "{}"'.format(
-                                            (self._topic + "; ") if self._topic != "" else "",
-                                            phase,
-                                            phase_king,
-                                        )
-                                    )
-                                    self._group_view.suspend_server(phase_king)
-                                    break
-
-            if timer is not None:
-                timer.cancel()
-
-        if majority_count >= no_of_correct_processes:
-            return majority_value, offset
-        return tiebreaker, offset
+    def __send_suspect_message(self, identifier: str, topic: str, round: int):
+        suspect_msg = GroupViewSuspect.initFromData(identifier, "PK-{}: {}".format(round, topic))
+        suspect_msg.encode()
+        self._response_channel.produce((suspect_msg.json_data, False), trash=True)
 
     def __debug(self, *msgs):
         if self.__verbose:
