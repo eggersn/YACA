@@ -2,6 +2,7 @@ import threading
 import base64
 from nacl.signing import VerifyKey
 
+from src.protocol.consensus.suspect import GroupViewSuspect
 from src.core.signatures.signatures import Signatures
 from src.protocol.group_view.join import JoinMsg, JoinRequest, JoinResponse
 from src.core.multicast.co_reliable_multicast import CausalOrderedReliableMulticast
@@ -84,7 +85,10 @@ class AnnouncementProcessing:
         response = JoinResponse.initFromData("waiting")
         success = self._udp_sender.send_udp_sync(response, (data[2], int(data[3])))
         if not success:
-            self._group_view.suspend_server(join_request.identifier)
+            suspect_msg = GroupViewSuspect.initFromData(join_request.identifier, "JOIN: {}".format(join_request.identifier))
+            suspect_msg.encode()
+
+            self._to_multicast.send(suspect_msg, True)
             return
 
         # halt delivery and sending

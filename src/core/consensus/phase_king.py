@@ -1,4 +1,5 @@
 import threading
+import math
 
 from src.core.utils.configuration import Configuration
 from src.core.group_view.group_view import GroupView
@@ -31,17 +32,24 @@ class PhaseKing:
         # This is achieved by the fact, that we execute this algorithm solely after delivering
         # a message via TO-multicast (which handles coordination and in particular JOIN messages)
         N = self._group_view.get_number_of_unsuspended_servers()
-        f = int(N / 4)
-        offset = 0
+        f = math.ceil(N / 4) - 1
+        kings = []
+        phase = 0
 
-        for phase in range(f + 1):
+        while f + 1 - len(kings) > 0:
             self.__debug(
-                "PhaseKing (Phase {}): King {}".format(phase, self._group_view.get_ith_server(phase + offset))
+                "PhaseKing (Phase {}): King {}".format(
+                    phase, self._group_view.get_next_active_after_ith_server(phase)
+                )
             )
-
             majority_value, majority_count = self._round1(value, phase)
-            value, offset = self._round2(majority_value, majority_count, phase, offset)
+            value, king = self._round2(majority_value, majority_count, phase)
             self.__debug('PhaseKing (Phase {}): Result "{}"'.format(phase, value))
+
+            kings.append(king)
+            kings = [king for king in kings if not self._group_view.check_if_server_is_inactive(king)]
+            N = self._group_view.get_number_of_unsuspended_servers()
+            f = math.ceil(N / 4) - 1
 
         return value
 
@@ -163,7 +171,7 @@ class PhaseKing:
 
             if sender_id not in suspected_servers[suspect_msg.identifier]:
                 suspected_servers[suspect_msg.identifier].append(sender_id)
-                f = int(N/4)
+                f = math.ceil(N / 4) - 1
 
                 # check if enough servers suspect the same process
                 if len(suspected_servers[suspect_msg.identifier]) > f:
@@ -192,9 +200,9 @@ class PhaseKing:
     If a phase king is suspended, the process with the next higher id is selected - until there exists a correct phase king. 
     """
 
-    def _round2(self, majority_value, majority_count, phase, offset):
+    def _round2(self, majority_value, majority_count, phase):
         def timeout_handler(i):
-            phase_king = self._group_view.get_ith_server(i)
+            phase_king = self._group_view.get_next_active_after_ith_server(i)
             suspect_msg = GroupViewSuspect.initFromData(phase_king, self._topic)
             suspect_msg.encode()
 
@@ -204,11 +212,7 @@ class PhaseKing:
         N = self._group_view.get_number_of_unsuspended_servers()
 
         while tiebreaker is None:
-            phase_king = self._group_view.get_ith_server(phase + offset)
-            while self._group_view.check_if_server_is_inactive(phase_king):
-                offset += 1
-                phase_king = self._group_view.get_ith_server(phase + offset)
-
+            phase_king = self._group_view.get_next_active_after_ith_server(phase)
             suspecting_servers = []
 
             self.__debug(
@@ -231,7 +235,7 @@ class PhaseKing:
                 timer = threading.Timer(
                     self._configuration.get_timeout(),
                     timeout_handler,
-                    args=(phase + offset,),
+                    args=(phase,),
                 )
                 timer.start()
 
@@ -260,11 +264,10 @@ class PhaseKing:
 
                         if suspect_msg.identifier == phase_king and sender_id not in suspecting_servers:
                             suspecting_servers.append(sender_id)
-                            f = int(N/4)
+                            f = math.ceil(N / 4) - 1
 
                             if len(suspecting_servers) > f:
                                 if not self._group_view.check_if_server_is_inactive(phase_king):
-                                    offset += 1
                                     self.__debug(
                                         'PhaseKing ({}Phase {} - Round 2): Suspending King "{}"'.format(
                                             (self._topic + "; ") if self._topic != "" else "",
@@ -278,10 +281,10 @@ class PhaseKing:
 
             if timer is not None:
                 timer.cancel()
-        f = int(N/4)
-        if majority_count >= N-f:
-            return majority_value, offset
-        return tiebreaker, offset
+        f = math.ceil(N / 4) - 1
+        if majority_count >= N - f:
+            return majority_value, phase_king
+        return tiebreaker, phase_king
 
     def __debug(self, *msgs):
         if self.__verbose:

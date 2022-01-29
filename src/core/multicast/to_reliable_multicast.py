@@ -62,7 +62,7 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
                                 and not self._group_view.check_if_server_is_inactive(server_id)
                                 and not server_id in self._halting_servers
                             ):
-                                suspect_msg = GroupViewSuspect.initFromData(server_id, key)
+                                suspect_msg = GroupViewSuspect.initFromData(server_id, "TO-Proposal: " + key)
                                 suspect_msg.encode()
                                 self.__debug("TO-Multicast: Suspect for timeout on proposal")
                                 self.send(suspect_msg)
@@ -171,11 +171,21 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
             N = self._group_view.get_number_of_unsuspended_servers()
             f = int(N / 4)
 
+            # remove suspect messages of inactive servers 
+            k = 0
+            while k < len(self._suspended_dict[(suspect_msg.identifier, suspect_msg.topic)]):
+                server = self._suspended_dict[(suspect_msg.identifier, suspect_msg.topic)][k]
+                if self._group_view.check_if_server_is_inactive(server):
+                    self._suspended_dict[(suspect_msg.identifier, suspect_msg.topic)].pop(k)
+                else:
+                    k += 1
+
             if len(self._suspended_dict[(suspect_msg.identifier, suspect_msg.topic)]) > f:
                 if not self._group_view.check_if_server_is_suspended(suspect_msg.identifier):
                     self.__debug('TotalOrdering: Suspending "{}"'.format(suspect_msg.identifier))
                     self._group_view.suspend_server(suspect_msg.identifier)
 
+                if "TO-Proposal" in suspect_msg.topic:
                     self._check_to_holdback_queue()
                     self._check_hold_messages()
 
