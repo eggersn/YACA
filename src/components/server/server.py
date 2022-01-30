@@ -1,3 +1,8 @@
+import time
+
+from src.protocol.consensus.suspect import GroupViewSuspect
+from src.core.unicast.sender import UnicastSender
+from src.protocol.election.announcement import ElectionAnnouncement
 from src.core.unicast.udp_listener import UDPUnicastListener
 from src.core.consensus.phase_king import PhaseKing
 from src.core.signatures.signatures import Signatures
@@ -16,6 +21,7 @@ from src.protocol.multicast.to_message import TotalOrderMessage
 from src.components.server.processing.client_requests import ClientRequestsProcessing
 from src.components.server.processing.announcements import AnnouncementProcessing
 from src.components.server.processing.joining import JoinProcessing
+from src.protocol.election.ping import ElectionPingMessage
 
 
 class Server:
@@ -28,15 +34,18 @@ class Server:
         self._discovery_channel = Channel()
         self._configuration = Configuration()
 
-        self._udp_listener = UDPUnicastListener(self._client_channel)
-        self._udp_listener.start()
-
         if initial:
             self._group_view = GroupView.initFromFile(
                 self._configuration.get_group_view_file(i), verbose=self.__verbose
             )
             self._signature = Signatures(self._group_view.sk, self._group_view.identifier)
+            self._udp_listener = UDPUnicastListener(
+                self._client_channel, listening_port=self._group_view.get_my_port()
+            )
+            self._udp_listener.start()
         else:
+            self._udp_listener = UDPUnicastListener(self._client_channel)
+            self._udp_listener.start()
             self._group_view = GroupView.generateOwnData(
                 self._configuration.get_global_group_view_file(),
                 self._udp_listener.get_port(),
@@ -119,6 +128,7 @@ class Server:
 
         self._discovery_processing = DiscoveryProcessing(
             self._discovery_channel,
+            self._discovery_listener,
             self._group_view,
             self._announcement_multicast,
             self._db_multicast,
@@ -140,10 +150,27 @@ class Server:
     def start(self):
         self._client_processing.start()
         self._announcement_processing.start()
+        self._discovery_processing.start()
 
-        if self._group_view.check_if_manager():
-            self._discovery_listener.start()
-            self._discovery_processing.start()
+        if not self._group_view.check_if_manager():
+            self.monitor_manager()
+
+    def monitor_manager(self):
+        self._udp_sender = UnicastSender(self._configuration)
+        while True:
+            time.sleep(self._configuration.get_heartbeat_interval())
+            ping_msg = ElectionPingMessage.initFromData()
+            addr = self._group_view.get_unicast_addr_of_server(self._group_view.manager)
+            is_active = self._udp_sender.send_udp_sync(ping_msg, addr)
+
+            if not is_active:
+                suspect_msg = GroupViewSuspect.initFromData(
+                    self._group_view.manager, "Timeout#{}".format(self._group_view.manager)
+                )
+                suspect_msg.encode()
+
+                self._announcement_multicast.send(suspect_msg)
+                self._group_view.wait_for_manager_to_be_elected()
 
     def __debug(self, *msgs):
         if self.__verbose:

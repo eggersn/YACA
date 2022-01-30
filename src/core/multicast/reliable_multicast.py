@@ -313,7 +313,6 @@ class ReliableMulticast:
         if check_responses:
             if not self._response_channel.is_empty():
                 response, config = self._response_channel.consume()
-                print("consume", response)
                 response_msg = Message.initFromJSON(response)
                 self.send(response_msg, config)
 

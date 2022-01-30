@@ -88,8 +88,6 @@ class CausalOrderedReliableMulticast(ReliableMulticast):
                 if not self._open:
                     pb_message.sign(self._signature)
 
-                print("SEND:", pb_message.json_data)                
-
                 self._udp_sock.sendto(
                     pb_message.json_data.encode(), (self._multicast_addr, self._multicast_port)
                 )
@@ -100,7 +98,6 @@ class CausalOrderedReliableMulticast(ReliableMulticast):
 
             if not self._response_channel.is_empty():
                 response, config = self._response_channel.consume()
-                print("consume", response)
                 response_msg = Message.initFromJSON(response)
                 self.send(response_msg, config)
         else:

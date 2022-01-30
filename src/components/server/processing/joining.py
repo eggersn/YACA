@@ -13,6 +13,7 @@ from src.core.broadcast.broadcast_listener import BroadcastListener
 from src.protocol.base import Message
 from src.core.unicast.sender import UnicastSender
 from src.core.consensus.phase_king import PhaseKing
+from src.core.election.election import Election
 
 
 class JoinProcessing:
@@ -32,6 +33,7 @@ class JoinProcessing:
         self._phase_king = PhaseKing(
             self._consensus_channel, None, self._group_view, self._configuration, verbose=True
         )
+        self._election = Election(self._phase_king, group_view, configuration, True)
         self._semaphore = semaphore
 
     def start(self):
@@ -51,6 +53,8 @@ class JoinProcessing:
 
         if "View: Join Message" == msg.header:
             return self._process_join(data)
+        elif "Election: Announcement" == msg.header:
+            self._process_election()
 
         return False
 
@@ -87,3 +91,9 @@ class JoinProcessing:
         else:
             self._semaphore.acquire()
             return False
+
+    def _process_election(self):
+        consented_value = self._phase_king.consensus("election")
+        
+        if consented_value == "election":
+            self._election.election()

@@ -100,7 +100,6 @@ class PhaseKing:
         i = 0
         while i < N:
             data = self._channel.consume(self._topic)
-            print("PhaseKing", data)
 
             message = Message.initFromJSON(data)
             message.decode()
@@ -174,7 +173,12 @@ class PhaseKing:
                 f = math.ceil(N / 4) - 1
 
                 # check if enough servers suspect the same process
-                if len(suspected_servers[suspect_msg.identifier]) > f:
+                if len(suspected_servers[suspect_msg.identifier]) > f and self._group_view.identifier not in suspected_servers[suspect_msg.identifier]:
+                    # peer pressure 
+                    response_suspect_msg = GroupViewSuspect.initFromData(suspect_msg.identifier, self._topic)
+                    response_suspect_msg.encode()
+                    self._multicast.send(response_suspect_msg)
+                if len(suspected_servers[suspect_msg.identifier]) >= N-f:
                     if not self._group_view.check_if_server_is_inactive(suspect_msg.identifier):
                         N -= 1
 
@@ -266,7 +270,12 @@ class PhaseKing:
                             suspecting_servers.append(sender_id)
                             f = math.ceil(N / 4) - 1
 
-                            if len(suspecting_servers) > f:
+                            if len(suspecting_servers) > f and self._group_view.identifier not in suspecting_servers:
+                                response_suspect_msg = GroupViewSuspect.initFromData(suspect_msg.identifier, suspect_msg.topic)
+                                response_suspect_msg.encode()
+                                self._multicast.send(response_suspect_msg)
+
+                            if len(suspecting_servers) >= N-f:
                                 if not self._group_view.check_if_server_is_inactive(phase_king):
                                     self.__debug(
                                         'PhaseKing ({}Phase {} - Round 2): Suspending King "{}"'.format(

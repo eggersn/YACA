@@ -2,6 +2,7 @@ import threading
 import base64
 from nacl.signing import VerifyKey
 
+from src.core.election.election import Election
 from src.protocol.consensus.suspect import GroupViewSuspect
 from src.core.signatures.signatures import Signatures
 from src.protocol.group_view.join import JoinMsg, JoinRequest, JoinResponse
@@ -14,6 +15,7 @@ from src.core.broadcast.broadcast_listener import BroadcastListener
 from src.protocol.base import Message
 from src.core.unicast.sender import UnicastSender
 from src.core.consensus.phase_king import PhaseKing
+from src.protocol.election.announcement import ElectionAnnouncement
 
 
 class AnnouncementProcessing:
@@ -35,6 +37,7 @@ class AnnouncementProcessing:
         self._signature = Signatures(group_view.sk, group_view.identifier)
 
         self._udp_sender = UnicastSender(self._configuration)
+        self._election = Election(phase_king, group_view, configuration)
 
     def start(self):
         consumer_thread = threading.Thread(target=self.consumer)
@@ -52,6 +55,9 @@ class AnnouncementProcessing:
 
         if "View: Join Message" == msg.header:
             self._process_join(data)
+        elif "Election: Announcement" == msg.header:
+            self._process_election()
+        
 
     def _process_join(self, data):
         join_msg = JoinMsg.initFromJSON(data)
@@ -93,3 +99,9 @@ class AnnouncementProcessing:
 
         # halt delivery and sending
         self._to_multicast.halt_multicast(join_request.identifier)
+
+    def _process_election(self):
+        consented_value = self._phase_king.consensus("election")
+        
+        if consented_value == "election":
+            self._election.election()

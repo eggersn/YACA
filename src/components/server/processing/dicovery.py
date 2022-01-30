@@ -1,5 +1,6 @@
 import threading
 
+from src.core.broadcast.broadcast_listener import BroadcastListener
 from src.protocol.group_view.join import *
 from src.core.multicast.co_reliable_multicast import CausalOrderedReliableMulticast
 from src.core.multicast.to_reliable_multicast import TotalOrderedReliableMulticast
@@ -9,18 +10,21 @@ from src.core.utils.channel import Channel
 from src.protocol.base import Message
 from src.core.unicast.sender import UnicastSender
 from src.protocol.multicast.to_message import TotalOrderMessage
+from src.protocol.election.announcement import ElectionAnnouncement
 
 
 class DiscoveryProcessing:
     def __init__(
         self,
         discovery_channel: Channel,
+        discovery_listener: BroadcastListener,
         group_view: GroupView,
         announcement_multicast: TotalOrderedReliableMulticast,
         db_multicast: CausalOrderedReliableMulticast,
         configuration: Configuration,
     ):
         self._channel = discovery_channel
+        self._discovery_listener = discovery_listener
         self._group_view = group_view
         self._announcement_multicast = announcement_multicast
         self._db_multicast = db_multicast
@@ -33,6 +37,19 @@ class DiscoveryProcessing:
         consumer_thread.start()
 
     def consumer(self):
+        while not self._group_view.check_if_manager():
+            self._group_view.wait_for_manager_to_be_suspended()
+
+            election_msg = ElectionAnnouncement.initFromData(self._group_view.manager)
+            election_msg.encode()
+            to_election_msg = TotalOrderMessage.initFromMessage(election_msg, "E#{}".format(self._group_view.manager))
+            to_election_msg.encode()
+            self._announcement_multicast.send(to_election_msg)
+
+            self._group_view.manager = ""
+            self._group_view.wait_for_manager_to_be_elected()
+
+        self._discovery_listener.start()
         responder = UnicastSender(self._configuration)
         responder.start()
         while True:
@@ -57,8 +74,6 @@ class DiscoveryProcessing:
     def _process_join_request(self, data):
         join_msg = JoinRequest.initFromJSON(data)
         join_msg.decode()
-
-        print(join_msg.json_data)
 
         if join_msg.identifier not in self._group_view.servers:
             if join_msg.identifier not in self._pending:

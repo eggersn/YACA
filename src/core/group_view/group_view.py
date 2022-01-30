@@ -12,7 +12,7 @@ from src.core.utils.ip_addr import get_host_ip
 class GroupView:
     def __init__(self, verbose=False):
         self.__verbose = verbose
-        
+
         self.pks = {}
         self.ip_addrs = {}
         self.ports = {}
@@ -26,6 +26,8 @@ class GroupView:
         self.sk: SigningKey
 
         self._ready_to_join_semaphore = threading.Semaphore(0)
+        self._manager_suspension_semaphore = threading.Semaphore(0)
+        self._manager_election_semaphore = threading.Semaphore(0)
         self._added_semaphore = threading.Semaphore(0)
 
     def check_if_participant(self, id: str):
@@ -33,6 +35,9 @@ class GroupView:
 
     def get_number_of_servers(self):
         return len(self.servers)
+
+    def get_unicast_addr_of_server(self, server):
+        return (self.ip_addrs[server], self.ports[server])
 
     def get_number_of_unsuspended_servers(self):
         return len(self.servers) - len(self.suspended_servers) - len(self.joining_servers)
@@ -42,10 +47,10 @@ class GroupView:
 
     def get_next_active_after_ith_server(self, i):
         k = 0
-        server = self.servers[i+k]
+        server = self.servers[i + k]
         while self.check_if_server_is_inactive(server):
-            k+=1
-            server = self.servers[i+k]
+            k += 1
+            server = self.servers[i + k]
         return server
 
     def suspend_server(self, identifier):
@@ -53,7 +58,22 @@ class GroupView:
         if identifier in self.servers and identifier not in self.suspended_servers:
             self.suspended_servers.append(identifier)
             if identifier == self.identifier:
-                os.system('kill %d' % os.getpid())
+                os.system("kill %d" % os.getpid())
+            elif identifier == self.manager:
+                if self.identifier not in self.joining_servers:
+                    self._manager_suspension_semaphore.release()
+
+    def wait_for_manager_to_be_suspended(self):
+        self._manager_suspension_semaphore.acquire()
+
+    def wait_for_manager_to_be_elected(self):
+        self._manager_election_semaphore.acquire()
+
+    def set_manager(self, manager):
+        self.__debug("Update MGR to", manager)
+        self.manager = manager
+        if self.identifier not in self.joining_servers:
+            self._manager_election_semaphore.release(2)
 
     def check_if_server_is_inactive(self, identifier):
         return identifier in self.suspended_servers or identifier in self.joining_servers
@@ -84,8 +104,8 @@ class GroupView:
         if identifier not in self.servers:
             self.servers.append(identifier)
             self.joining_servers.append(identifier)
-            self.pks[identifier] = pk 
-            self.ip_addrs[identifier] = ip_addr 
+            self.pks[identifier] = pk
+            self.ip_addrs[identifier] = ip_addr
             self.ports[identifier] = port
 
     def mark_server_as_joined(self, identifier):
@@ -160,7 +180,7 @@ class GroupView:
 
         group_view.servers.sort()
         group_view.manager = group_view.servers[-1]
-        
+
         group_view.servers.append(group_view.identifier)
         group_view.joining_servers = [group_view.identifier]
 
@@ -168,4 +188,4 @@ class GroupView:
 
     def __debug(self, *msgs):
         if self.__verbose:
-            print("\n",*msgs, "\n")
+            print("\n", *msgs, "\n")

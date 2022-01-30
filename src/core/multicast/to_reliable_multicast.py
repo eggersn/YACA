@@ -169,9 +169,9 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
                 self._suspended_dict[(suspect_msg.identifier, suspect_msg.topic)].append(sender_id)
 
             N = self._group_view.get_number_of_unsuspended_servers()
-            f = int(N / 4)
+            f = int(N / 3)
 
-            # remove suspect messages of inactive servers 
+            # remove suspect messages of inactive servers
             k = 0
             while k < len(self._suspended_dict[(suspect_msg.identifier, suspect_msg.topic)]):
                 server = self._suspended_dict[(suspect_msg.identifier, suspect_msg.topic)][k]
@@ -180,7 +180,19 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
                 else:
                     k += 1
 
-            if len(self._suspended_dict[(suspect_msg.identifier, suspect_msg.topic)]) > f:
+            if (
+                len(self._suspended_dict[(suspect_msg.identifier, suspect_msg.topic)]) > f
+                and self._group_view.identifier
+                not in self._suspended_dict[(suspect_msg.identifier, suspect_msg.topic)]
+            ):
+                # peer pressure...
+                response_suspect_msg = GroupViewSuspect.initFromData(
+                    suspect_msg.identifier, suspect_msg.topic
+                )
+                response_suspect_msg.encode()
+                self._response_channel.produce((response_suspect_msg.json_data, True))
+
+            if len(self._suspended_dict[(suspect_msg.identifier, suspect_msg.topic)]) >= N - f:
                 if not self._group_view.check_if_server_is_suspended(suspect_msg.identifier):
                     self.__debug('TotalOrdering: Suspending "{}"'.format(suspect_msg.identifier))
                     self._group_view.suspend_server(suspect_msg.identifier)
@@ -303,7 +315,7 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
             suspect_msg.encode()
             self.__debug("TO-Multicast: Suspect for sending after halting: ", sender_id)
             self._response_channel.produce((suspect_msg.json_data, True))
-        else:
+        elif message.msg_identifier not in self._to_holdback_dict:
             self._P_g = max(self._A_g, self._P_g) + 1
             with self._to_holdback_dict_lock:
                 timestamp = time.time_ns() / 10 ** 9
