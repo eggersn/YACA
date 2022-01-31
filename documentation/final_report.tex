@@ -1,0 +1,238 @@
+% This is samplepaper.tex, a sample chapter demonstrating the
+% LLNCS macro package for Springer Computer Science proceedings;
+% Version 2.20 of 2017/10/04
+%
+\documentclass[runningheads]{llncs}
+%
+\usepackage{graphicx}
+\usepackage{amsmath, amssymb}
+\usepackage{listings}
+\usepackage{color}
+\usepackage{cleveref}
+
+\definecolor{darkgreen}{rgb}{0,0.6,0}
+% Used for displaying a sample figure. If possible, figure files should
+% be included in EPS format.
+%
+% If you use the hyperref package, please uncomment the following line
+% to display URLs in blue roman font according to Springer's eBook style:
+% \renewcommand\UrlFont{\color{blue}\rmfamily}
+
+\begin{document}
+%
+\title{YACA: Yet Another Chat Application}
+
+\author{Group 23: Simon Egger \and Nicolai Krebs}
+
+\institute{}
+%
+\maketitle              % typeset the header of the contribution
+
+
+\section{Architecture Design}
+
+\subsection{Primitives}
+
+\subsubsection{Notation} We use $V$ to denote the (finite) set of server processes. To coincide with the notation of the lecture and \cite{ds_book}, we sometimes use $g$ do denote the server group.
+
+\subsubsection{Messages}
+In general, all messages inherit the base class \textsf{Message}, which includes fields for the message \textsf{Header}, \textsf{Content}, and \textsf{Metadata}. Furthermore, base functionalities include encoding and decoding the messages, using JSON. The message type is uniquely identified by the header, which tells the process how the message's content should be processed and which metadata is included. Examples for included metadata are digital signatures, sequence numbers, piggybacked acknowledgements, or nonces.
+
+\subsubsection{Delivery Queues}
+Another useful primitive is the FIFO delivery queue. Our general approach for processing incoming messages is to have one listening thread per listening port, which handles configuration messages (e.g. heartbeat messages, negative acknowledgements, or proposal messages for TO-multicast) and forwards only the relevant messages via a delivery queue to one or multiple worker threads. Therefore, we use locks to realize this in a thread-safe manner. Furthermore, we use semaphores to provide a blocking consume and a non-blocking produce operation. 
+
+\subsubsection{Reliable Multicast (R-Multicast)}
+In general, we implement R-multicast using a combination of reliable multicast over IP multicast, as described in \cite[p.~649]{ds_book}. Each process $p \in V$ manages a local sequence number $S_p$, which is initialized as zero and is atomically incremented each time $p$ sends a message, and a dictionary $R_g: V \rightarrow \mathbb{N}$, where $R_g(q)$ keeps track of $q$'s last delivered message sequence number (for each $q \in V$). When sending a message (via IP multicast), $p$ includes both $S_p$ and $R_g^p := \{(q, R_g(q)) | q \in V\}$ as metadata. Therefore, when a message $m$ is received with the attached sequence number $S$ by some process $q$, there are three possible cases:
+\begin{enumerate}
+    \item[i)] $S \leq R_g(q)$: $p$ already delivered $m$ and simply discards the duplicate 
+    \item[ii)] $S = R_g(q)+1$: $p$ delivers $m$ and additionally stores it indefinitely
+    \item[iii)] $S > R_g(q)+1$: $p$ detects that there are missing messages and places $m$ in a holdback-queue   
+\end{enumerate}
+Note that piggybacking $R_g^p$ to a message implicitly acts as an acknowledgement. As this only works if $p$ continuously sends messages, we periodically send heartbeat messages as well. 
+
+If $p$ detects missing messages, by inspecting piggybacked acknowledgements of normal messages or heartbeat messages, it sends negative acknowledgements to the sender (which is not necessarily the original sender of the message). Since each message is digitally signed, we assume that messages forwarded in this manner cannot be manipulated by the forwarding process (which is an additional guarantee on top of the checksums used internally for IP multicast). After missing messages are delivered, $p$ checks its holdback-queue for messages that are now able to be delivered. 
+
+Similar to the original protocol described in \cite[p.~649]{ds_book}, it is easy to see that above protocol satisfies the following properties:
+\begin{itemize}
+    \item \textit{Integrity:} Duplicates are detected by inspecting the attached sequence number. IP multicast uses checksums, and we use additional digital signatures to ensure that the received message is identical to the message signed by the sending process.
+    \item \textit{Validity:} Trivially satisfied by the usage of IP multicast.
+    \item \textit{Agreement:} Each process is able to detect that some process $q$ delivered $m$ by inspecting $R_g^q$ attached to the following messages. Since $q$ stores $m$ indefinitely, $p$ can request the missing message by sending negative acknowledgements.
+\end{itemize}
+
+\subsubsection{Causal-Ordered Reliable Multicast (CO-R-Multicast)}
+The protocol above can now be extended to support causal ordering by using the strategy described in \cite[p.~657-658]{ds_book}: Each process manages a further holdback-queue and an additional vector stamp $R_g^{CO}: V \rightarrow \mathbb{N}$, where $R_g^{CO}(q)$ manages the last CO-R-delivered message sequence number of process $q$. When process $p$ R-delivers a message $m$ of sender $q$ with attached vector stamp $R$ and sequence number $S$, it places $m$ in the second holdback-queue until the contraints
+\begin{enumerate}
+    \item[i)] $R_g^{CO}(q) + 1 = S$, and 
+    \item[ii)] $R_g^{CO}(q') \geq R(q')$ for each $q' \in V \backslash \{q\}$
+\end{enumerate}
+are satisfied. The proof of correctness is identical to the one given in \cite[p.~658]{ds_book}.
+
+\subsubsection{Suspicion Protocol}
+When having malicious servers in our system it is advantageous to have a protocol that is able to suspend them, if inconsistent or incorrect behavior is detected. In this context, suspending a server means that no more incoming messages are accepted anymore, or to be more exact, no new message is accepted from the suspended server that was not already acknowledged by another server. This can easily be achieved by using digital signatures and only accepting messages that are gathered via negative acknowledgements. 
+
+One straight-forward strategy to achieve an agreed suspension is to send \textit{suspect messages} to all other servers and suspend a server as soon as at least one suspect message has arrived. To avoid having a malicious server sending suspect messages for all servers and suspending them, we modify this protocol to allow for $f < n/3$ malicious servers (since we utilize the Phase-King algorithm this limit is of course capped by $f < \lceil n/4 \rceil$):
+\begin{itemize}
+    \item If detecting inconsistent or incorrect behavior (e.g. timeout on response), send a suspect message. The suspect message contains the suspected server identification and the reason why the server is suspected (e.g. ''proposal timeout on \textit{msg\_id}'' for the ISIS algorithm).
+    \item If a server gathers more than $f$ suspect messages for the same server and the same reason, he sends a suspect message himself if he did not already send one.
+    \item If a server gathers at least $n-f$ suspect messages, the server is suspended.
+\end{itemize}
+For the proof of correctness, it is easy to see that if a server gathers $n-f$ suspect messages, he can be sure that all other correct processes gather at least $n-2f > f$ (for $f < n/3$) suspect messages of the same kind. Thus, eventually, every correct process eventually sends a suspect message and suspends the server. On the other hand, if a server receives at least $f$ suspect messages, he can be sure that at least one correct (or honest) server is suspecting the accused server.
+
+\subsubsection{Phase-King Algorithm}
+Generally, we implement the Phase-King algorithm, as presented in the lecture, on top of CO-R-multicast, which ensures that the messages of different rounds are separated more elegantly. Furthermore, we use the suspicion protocol described above if a server detects a timeout while waiting for a message. Then, the accused server is either suspended by all correct servers, or the missing message is eventually delivered by using negative acknowledgements.
+
+Furthermore, we ensure that the Phase-King algorithm is only executed when each correct server has the same group-view. During the execution, we therefore do not allow new servers to join (TODO reference). 
+
+\subsubsection{Total-Ordered Reliable Multicast (TO-R-Multicast)}
+We build TO-R-multicast on top of CO-R-multicast using the ISIS algorithm described in \cite[p.~655-656]{ds_book}. We use CO-R-multicast for the following three reasons:
+\begin{enumerate}
+    \item[i)] Proposal messages are delivered after the original message
+    \item[ii)] To support our JOIN mechanisms of new servers (TODO reference)
+    \item[iii)] To perform the Max-Phase-King algorithm (cf. \Cref{appendix:maxphaseking}) on the agreed sequence numbers   
+\end{enumerate}
+This, however, does not guarantee that the total-ordered messages satisfy causal-ordering as well.
+
+Each server $p$ maintains variables $P_g^p$ and $A_g^p$. Upon sending a message via TO-R-multicast, the sender adds a randomly generated message ID and CO-R-multicasts it. When a server CO-R-delivers such a message, he responds with a proposal $P_g^p = max(A_g^p, P_g^p)+1$ for the message's sequence number. This is also done via CO-R-multicast, as opposed to unicast \cite[p.~655-656]{ds_book}. This allows us to use the Max-Phase-King algorithm directly as described in \Cref{appendix:maxphaseking}. 
+
+%
+% ---- Bibliography ----
+%
+\bibliographystyle{plain} % We choose the "plain" reference style
+\bibliography{bibtex}
+
+\newpage 
+\appendix
+\section{Appendix}
+\subsection{Max-Phase-King Algorithm}\label{appendix:maxphaseking}
+\lstset{
+    basicstyle=\ttfamily,
+    breaklines=true,
+    language=C++,
+    escapeinside={\%(}{\%)},
+    commentstyle=\color{darkgreen},
+    frame=single,
+    keywords={def, function, begin, end, for, do, done, broadcast, await, if, then, else, receive, pass, output},
+    keywordstyle=\bfseries\color{blue},
+    numbers=left,
+}
+\begin{lstlisting}
+function MaxPhaseKing(%($v_{init}$%): int, %($f$%): int) for %($p_i \in V$%) begin 
+    // Preparation
+    broadcast %($v_{init}$%) to all processes
+    await value %($v_j$%) from each process %($p_j \in V$%)
+    %($\tilde{v}$%) %($\leftarrow$%) %($max\{v_j \mid p_j \in V\}$%)
+    %($v$%) %($\leftarrow$%) %($\tilde{v}$%)
+
+    for %($phase$%) = %($1,\ldots,f+1$%) do
+        // Round 1
+        broadcast %($v$%) to all processes
+        await value %($v_j$%) from each process %($p_j \in V$%)
+        %($mode$%) %($\leftarrow$%) mode of the %($v_j$'s%)
+        %($mult$%) %($\leftarrow$%) number of times that %($mode$%) occurs 
+        %($median$%) %($\leftarrow$%) median of the %($v_j$'s%)
+
+        // Round 2
+        if %($i = phase$%) then 
+            broadcast %($\lceil median \rceil$%) to all processes 
+        receive %($tiebreaker$%) from %($p_{phase}$%)
+        if %($mult > |V|/2 + f$%) then 
+            %($v$%) %($\leftarrow$%) %($mode$%)
+        else if %($|\{v_j \mid v_j \leq tiebreaker\}| > f$%)
+            %($v$%) %($\leftarrow$%) %($tiebreaker$%)
+    done
+
+    output %($v$%)
+end
+\end{lstlisting}
+
+\subsubsection{Notation} As before, we use $V$ to denote the set of all processes. Let $n := |V|$ and $f < \lceil n/4 \rceil$ be the number of malicious processes. We denote $V_g \subseteq V$ as the set of correct processes and use the notation $v^{(p, k)}$ to denote the value of $v$ for process $p$ in phase $k$ ($k=0$ is used for the preparation phase). If the variable does not change with different phases, we omit $k$.
+
+\subsubsection{Proof of Correctness} Our main goal is to show that all correct processes output the same value $v$ and that $v \geq v_{init}^{(p)}$ for all $p \in V_g$.
+
+\begin{lemma}\label{lemma:maxpk1}
+    Let $p_i$ be the phase-king. If $p_i$ is correct then $|\{v_j^{(p_k,i)} \mid v_j^{(p_k,i)} \leq tiebreaker^{(p_k,i)}\}| > f$ for all correct processes $p_k \in V_g$.
+\end{lemma}
+
+\begin{proof}
+    If $p_i$ is correct, he gathers $\{v_j^{(p_i,i)} \mid p_j \in V\}$. After rewriting these values as 
+    \begin{align*}
+        v_{(1)} \leq v_{(2)} \leq \ldots \leq v_{(n)},
+    \end{align*}
+    the median is computed as $median = v_{(\frac{n+1}{2})}$ if $n$ is odd, or $median = (v_{(\frac{n}{2})} + v_{(\frac{n}{2}+1)})/2$ if $n$ is even. In both cases we have that 
+    \begin{align*}
+        |\{v_j^{(p_i,i)} \mid v_j^{(p_i,i)} \leq \lceil median \rceil\}| \geq \left\lceil \frac{n}{2} \right\rceil,
+    \end{align*} 
+    which in turn yields:
+    \begin{align*}
+        |\{v_j^{(p_k,i)} \mid v_j^{(p_k,i)} \leq tiebreaker^{(p_k,i)}\}| &\geq |\{v_j^{(p_i,i)} \mid v_j^{(p_i,i)} \leq \lceil median \rceil\}| - f \\
+        &\geq \left\lceil \frac{n}{2} \right\rceil - f \\
+        &> \left\lceil \frac{n}{2} \right\rceil - \left\lceil \frac{n}{4} \right\rceil  \\
+        &\geq \left\lceil \frac{n}{4} \right\rceil - 1 \qquad \geq \; f
+    \end{align*} \qed
+\end{proof}
+
+\begin{lemma}\label{lemma:maxpk2}
+    Let $p_i$ be the phase-king. If $p_i$ is correct, then all correct processes share the same value for $v$ after the current phase. 
+\end{lemma}
+\begin{proof}
+    Let $p_j$ and $p_k$ be arbitrary correct processes. Due to \Cref{lemma:maxpk1}, $v$ is updated with the $mode$ or the $tiebreaker$ value. Therefore, there are three cases to consider:
+    \begin{enumerate}
+        \item[i)] $p_j$ and $p_k$ use their $mode$ value: Then, $p_j$ received $mode^{(p_j,i)}$ more than $n/2+f$ times, which implies that $p_k$ also received $mode^{(p_j,i)}$ more than $n/2$ times. Therefore, there is no other possibility than $mode^{(p_k,i)} = mode^{(p_j,i)}$.
+        \item[ii)] $p_j$ uses its $mode$ value and $p_k$ uses the $tiebreaker$ value: As before, $p_j$ received $mode^{(p_j,i)}$ more than $n/2+f$ times, which implies that the phase-king $p_i$ also received $mode^{(p_j,i)}$ more than $n/2$ times. Therefore, we have $median^{(p_i,i)} = mode^{(p_j,i)} \in \mathbb{N}$, which is then received by $p_k$ as the $tiebreaker$.
+        \item[iii)] $p_j$ and $p_k$ use the $tiebreaker$ value: As $p_i$ is assumed to be correct, both receive the same $tiebreaker$ value. 
+    \end{enumerate} \qed
+\end{proof}
+
+\begin{lemma}\label{lemma:maxpk3}
+    Let $1 \leq i \leq f+1$ be a phase with a correct phase-king. Then, the following holds true:
+    \begin{align*}
+        \forall p_j, p_k \in V_g \forall phase \in \{i, \ldots, f+1\}: v^{(p_j, phase)} = v^{(p_k, phase)}
+    \end{align*}
+    That is, once there was a correct phase-king, all correct processes continue to share the same value for $v$ afterwards. 
+\end{lemma}
+\begin{proof}
+    \Cref{lemma:maxpk2} handles the case of $phase = i$. Afterwards, all correct processes broadcast the same value of $v$, which implies that $mult^{(p_j, phase)} \geq n-f > n/2+f$ is satisfied for all $p_j \in V_g$ and $i < phase \leq f+1$. Using the same argument as $i)$ in the proof of \Cref{lemma:maxpk2}, it is easy to see that the statement holds true. \qed
+\end{proof}
+
+\begin{lemma}\label{lemma:maxpk4}
+    The following statement holds true:
+    \begin{align*}
+        \forall p_j, p_k \in V_g \forall phase \in \{0, \ldots, f+1\}: v^{(p_j, phase)} \geq v_{init}^{(p_k)}
+    \end{align*}
+    That is, the value of $v$ for a correct process $p_j$ is always larger than the initial values of all correct processes. 
+\end{lemma}
+\begin{proof}
+    We use an inductive argument to prove this statement. For $phase = 0$, $v^{(p_j,0)}$ is initialized in line 6. As all correct processes $p_k$ broadcast their initial value $v_{init}^{(p_k)}$ the statement is trivially satisfied. 
+
+    For $phase > 0$, $v^{(p_j,phase)}$ there are three cases to consider:
+    \begin{enumerate}
+        \item[i)] $v^{(p_j,phase)}$ is not updated, i.e., $v^{(p_j,phase)} = v^{(p_j,phase-1)}$: By the induction hypothesis, the statement holds true. 
+        \item[ii)] $v^{(p_j,phase)}$ is updated in line 21. Then $mult^{(p_j, phase)}  > n/2+f$ which implies that at least one correct process $p_l$ sent $mode^{(p_j, phase)}$ at the beginning of the phase. Using the induction hypothesis, we have:
+        \begin{align*}
+            v^{(p_j,phase)} = mode^{(p_j, phase)} = v^{(p_l,phase-1)} \geq v_{init}^{(p_k)}, \quad \forall p_k \in V_g
+        \end{align*} 
+        \item[iii)] $v^{(p_j,phase)}$ is updated in line 23. Let
+        \begin{align*}
+            C = \{v_k^{(p_j,phase)} \mid v_k^{(p_j,phase)} \leq tiebreaker^{(p_j,phase)}\},
+        \end{align*}
+        then the condition in line 22 states $|C| > f$. Therefore, there exists at least one correct process $p_l$ with $v_l^{(p_j,phase)} \in C$. This yields:
+        \begin{align*}
+            v^{(p_j,phase)} = tiebreaker^{(p_j,phase)} \geq v_l^{(p_j,phase)} = v^{(p_l,phase-1)} \geq v_{init}^{(p_k)},
+        \end{align*}
+        for all $p_k \in V_g$.
+    \end{enumerate} \qed
+\end{proof}
+
+\begin{theorem}
+    Each correct process $p_j$ that executes the Max-Phase-King algorithm outputs $v^{(p_j, f+1)}$ that satisfies
+    \begin{enumerate}
+        \item[i)] $\forall p_k \in V_g: v^{(p_j, f+1)} = v^{(p_k, f+1)}$, and 
+        \item[ii)] $\forall p_k \in V_g: v^{(p_j, f+1)} \geq v_{init}^{(p_k)}$.
+    \end{enumerate}
+\end{theorem}
+\begin{proof}
+    \Cref{lemma:maxpk3} proves statement $i)$ and \Cref{lemma:maxpk4} proves statement $ii)$. \qed
+\end{proof}
+
+
+\end{document}
