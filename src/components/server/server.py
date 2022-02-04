@@ -21,7 +21,7 @@ from src.protocol.multicast.to_message import TotalOrderMessage
 from src.components.server.processing.client_requests import ClientRequestsProcessing
 from src.components.server.processing.announcements import AnnouncementProcessing
 from src.components.server.processing.joining import JoinProcessing
-from src.protocol.election.ping import ElectionPingMessage
+from src.protocol.ping.ping import PingMessage
 
 
 class Server:
@@ -152,25 +152,33 @@ class Server:
         self._announcement_processing.start()
         self._discovery_processing.start()
 
-        if not self._group_view.check_if_manager():
-            self.monitor_manager()
+        self.monitor()
 
-    def monitor_manager(self):
+    def monitor(self):
+        suspected_servers = {}
         self._udp_sender = UnicastSender(self._configuration)
         while True:
             time.sleep(self._configuration.get_heartbeat_interval())
-            ping_msg = ElectionPingMessage.initFromData()
-            addr = self._group_view.get_unicast_addr_of_server(self._group_view.manager)
-            is_active = self._udp_sender.send_udp_sync(ping_msg, addr)
+            ts = time.time_ns() / 10 ** 9
+            ping_msg = PingMessage.initFromData()
+            for server in self._group_view.servers:
+                if server in suspected_servers and ts - suspected_servers[server] > self._configuration.get_timeout():
+                    del suspected_servers[server]
+                    
+                if not self._group_view.check_if_server_is_inactive(server) and server not in suspected_servers:
+                    addr = self._group_view.get_unicast_addr_of_server(server)
+                    is_active = self._udp_sender.send_udp_sync(ping_msg, addr)
 
-            if not is_active:
-                suspect_msg = GroupViewSuspect.initFromData(
-                    self._group_view.manager, "Timeout#{}".format(self._group_view.manager)
-                )
-                suspect_msg.encode()
+                    if not is_active:
+                        suspect_msg = GroupViewSuspect.initFromData(
+                            server, "Timeout#{}".format(server)
+                        )
+                        suspect_msg.encode()
 
-                self._announcement_multicast.send(suspect_msg)
-                self._group_view.wait_for_manager_to_be_elected()
+                        self._announcement_multicast.send(suspect_msg)
+                        suspected_servers[server] =  ts
+
+                # self._group_view.wait_for_manager_to_be_elected()
 
     def __debug(self, *msgs):
         if self.__verbose:

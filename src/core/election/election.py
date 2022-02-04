@@ -4,7 +4,7 @@ from src.core.utils.channel import Channel
 from src.core.multicast.co_reliable_multicast import CausalOrderedReliableMulticast
 from src.core.group_view.group_view import GroupView
 from src.core.consensus.phase_king import PhaseKing
-from src.protocol.election.ping import ElectionPingMessage
+from src.protocol.ping.ping import PingMessage
 
 class Election:
     def __init__(self, phase_king : PhaseKing, group_view : GroupView, configuration : Configuration, quite=False):
@@ -26,7 +26,7 @@ class Election:
             elif self._quite: # used for joining processes
                 is_active = True
             else:
-                ping_msg = ElectionPingMessage.initFromData()
+                ping_msg = PingMessage.initFromData()
                 addr = self._group_view.get_unicast_addr_of_server(potential_leader)
                 is_active = self._udp_sender.send_udp_sync(ping_msg, addr)
             

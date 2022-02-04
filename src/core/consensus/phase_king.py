@@ -67,6 +67,7 @@ class PhaseKing:
                 if server_id not in sender_ids and not self._group_view.check_if_server_is_inactive(
                     server_id
                 ):
+                    self.__debug("PhaseKing: Suspecting {} in Round 1".format(server_id))
                     suspect_msg = GroupViewSuspect.initFromData(server_id, self._topic)
                     suspect_msg.encode()
 
@@ -173,12 +174,15 @@ class PhaseKing:
                 f = math.ceil(N / 4) - 1
 
                 # check if enough servers suspect the same process
-                if len(suspected_servers[suspect_msg.identifier]) > f and self._group_view.identifier not in suspected_servers[suspect_msg.identifier]:
-                    # peer pressure 
+                if (
+                    len(suspected_servers[suspect_msg.identifier]) > f
+                    and self._group_view.identifier not in suspected_servers[suspect_msg.identifier]
+                ):
+                    # peer pressure
                     response_suspect_msg = GroupViewSuspect.initFromData(suspect_msg.identifier, self._topic)
                     response_suspect_msg.encode()
                     self._multicast.send(response_suspect_msg)
-                if len(suspected_servers[suspect_msg.identifier]) >= N-f:
+                if len(suspected_servers[suspect_msg.identifier]) >= N - f:
                     if not self._group_view.check_if_server_is_inactive(suspect_msg.identifier):
                         N -= 1
 
@@ -207,6 +211,7 @@ class PhaseKing:
     def _round2(self, majority_value, majority_count, phase):
         def timeout_handler(i):
             phase_king = self._group_view.get_next_active_after_ith_server(i)
+            self.__debug("PhaseKing: Suspecting {} in Round 1".format(phase_king))
             suspect_msg = GroupViewSuspect.initFromData(phase_king, self._topic)
             suspect_msg.encode()
 
@@ -270,12 +275,17 @@ class PhaseKing:
                             suspecting_servers.append(sender_id)
                             f = math.ceil(N / 4) - 1
 
-                            if len(suspecting_servers) > f and self._group_view.identifier not in suspecting_servers:
-                                response_suspect_msg = GroupViewSuspect.initFromData(suspect_msg.identifier, suspect_msg.topic)
+                            if (
+                                len(suspecting_servers) > f
+                                and self._group_view.identifier not in suspecting_servers
+                            ):
+                                response_suspect_msg = GroupViewSuspect.initFromData(
+                                    suspect_msg.identifier, suspect_msg.topic
+                                )
                                 response_suspect_msg.encode()
                                 self._multicast.send(response_suspect_msg)
 
-                            if len(suspecting_servers) >= N-f:
+                            if len(suspecting_servers) >= N - f:
                                 if not self._group_view.check_if_server_is_inactive(phase_king):
                                     self.__debug(
                                         'PhaseKing ({}Phase {} - Round 2): Suspending King "{}"'.format(

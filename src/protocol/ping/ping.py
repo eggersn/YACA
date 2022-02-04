@@ -1,7 +1,7 @@
 from src.protocol.base import Message
 
 
-class ElectionPingMessage(Message):
+class PingMessage(Message):
     def __init__(self):
         super().__init__()
         self.content = {}
@@ -9,6 +9,6 @@ class ElectionPingMessage(Message):
     @classmethod
     def initFromData(cls):
         message = cls()
-        message.header = "Election: Ping"
+        message.header = "Ping"
 
         return message

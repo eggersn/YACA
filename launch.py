@@ -3,6 +3,7 @@ import enquiries
 import os
 import sys
 import re
+import math
 
 import multiprocessing
 from src.components.server.server import Server
@@ -83,7 +84,7 @@ def kill_processes_menu():
 
 
 def kill_processes_component_menu(component):
-    print_menu_banner("Kill Processes (Selection: " + component + ")")
+    print_menu_banner("Kill Processes (Selection: " + component + ") - Suggestion: Upper limit for Byzantine faults: " + str(math.ceil(len(processes[component])/4)-1))
 
     options = []
     counter = 1

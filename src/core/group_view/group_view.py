@@ -73,7 +73,7 @@ class GroupView:
         self.__debug("Update MGR to", manager)
         self.manager = manager
         if self.identifier not in self.joining_servers:
-            self._manager_election_semaphore.release(2)
+            self._manager_election_semaphore.release()
 
     def check_if_server_is_inactive(self, identifier):
         return identifier in self.suspended_servers or identifier in self.joining_servers

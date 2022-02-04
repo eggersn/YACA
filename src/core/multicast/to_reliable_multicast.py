@@ -69,7 +69,6 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
             self._max_phase_king.check_timeouts(self._halting_servers, self.send)
 
     def _co_deliver(self, data, identifier, seqno):
-        self.__debug("CO-Multicast: Deliver", data)
         self._to_consume(data, identifier, seqno)
 
     def _to_deliver(self, data):
@@ -117,10 +116,10 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
                     self._group_view.get_number_of_unsuspended_servers(),
                 )
             )
-            if entry[0] < (message.seqno, identifier):
-                entry[0] = (message.seqno, identifier)
+            if entry[0] < message.seqno:
+                entry[0] = message.seqno
                 self._A_g = max(self._A_g, message.seqno)
-                self._to_holdback_queue.sort(key=lambda entry: entry[0])
+                self._to_holdback_queue.sort(key=lambda entry: (entry[0], entry[1]))
 
             self._check_to_holdback_queue()
 
@@ -158,7 +157,7 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
 
         if self._group_view.check_if_participant(suspect_msg.identifier):
             if (suspect_msg.identifier, suspect_msg.topic) not in self._suspended_dict:
-                self._suspended_dict[(suspect_msg.identifier, suspect_msg.topic)] = []
+                self._suspended_dict[(suspect_msg.identifier, suspect_msg.topic)] = {}
 
             if sender_id not in self._suspended_dict[(suspect_msg.identifier, suspect_msg.topic)]:
                 self.__debug(
@@ -166,17 +165,22 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
                         suspect_msg.identifier, sender_id, suspect_msg.topic
                     )
                 )
-                self._suspended_dict[(suspect_msg.identifier, suspect_msg.topic)].append(sender_id)
+
+                ts = time.time_ns() / 10 ** 9
+                self._suspended_dict[(suspect_msg.identifier, suspect_msg.topic)][sender_id] = ts
 
             N = self._group_view.get_number_of_unsuspended_servers()
             f = int(N / 3)
 
             # remove suspect messages of inactive servers
             k = 0
-            while k < len(self._suspended_dict[(suspect_msg.identifier, suspect_msg.topic)]):
-                server = self._suspended_dict[(suspect_msg.identifier, suspect_msg.topic)][k]
-                if self._group_view.check_if_server_is_inactive(server):
-                    self._suspended_dict[(suspect_msg.identifier, suspect_msg.topic)].pop(k)
+            ts = time.time_ns() / 10 ** 9
+            servers = list(self._suspended_dict[(suspect_msg.identifier, suspect_msg.topic)].keys()).copy()
+            while k < len(servers):
+                server = servers[k]
+                server_ts = self._suspended_dict[(suspect_msg.identifier, suspect_msg.topic)][server]
+                if self._group_view.check_if_server_is_inactive(server) or ts - server_ts > self._configuration.get_timeout():
+                    del self._suspended_dict[(suspect_msg.identifier, suspect_msg.topic)][server]
                 else:
                     k += 1
 
@@ -191,6 +195,7 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
                 )
                 response_suspect_msg.encode()
                 self._response_channel.produce((response_suspect_msg.json_data, True))
+                print("Peer Pressure", response_suspect_msg.json_data, self._suspended_dict)
 
             if len(self._suspended_dict[(suspect_msg.identifier, suspect_msg.topic)]) >= N - f:
                 if not self._group_view.check_if_server_is_suspended(suspect_msg.identifier):
@@ -320,8 +325,8 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
             with self._to_holdback_dict_lock:
                 timestamp = time.time_ns() / 10 ** 9
                 self._to_holdback_dict[message.msg_identifier] = [data, [], timestamp]
-            self._to_holdback_queue.append([(self._P_g, ""), message.msg_identifier, 0, False])
-            self._to_holdback_queue.sort(key=lambda entry: entry[0])
+            self._to_holdback_queue.append([0, message.msg_identifier, 0, False])
+            self._to_holdback_queue.sort(key=lambda entry: (entry[0], entry[1]))
 
             response_msg = TotalOrderProposal.initFromData(self._P_g, message.msg_identifier)
             response_msg.encode()
