@@ -4,18 +4,18 @@ import uuid
 from nacl.signing import SigningKey
 
 class Configuration:
-    def __init__(self, file_location="config/server.json"):
+    def __init__(self, file_location="config/config.json"):
         f = open(file_location)
         self.data = json.load(f)
 
     def get_multicast_addr(self):
         return self.data["multicast"]["addr"]
 
-    def get_client_multicast_port(self):
-        return self.data["multicast"]["client_port"]
+    def get_client_read_multicast_port(self):
+        return self.data["multicast"]["client_read_port"]
 
-    def get_db_multicast_port(self):
-        return self.data["multicast"]["database_port"]
+    def get_client_write_multicast_port(self):
+        return self.data["multicast"]["client_write_port"]
 
     def get_announcement_multicast_port(self):
         return self.data["multicast"]["announcement_port"]
@@ -46,6 +46,9 @@ class Configuration:
 
     def get_timeout(self):
         return self.data["crash_fault_detection"]["timeout"]
+
+    def get_client_polling(self):
+        return self.data["client"]["polling_rate"]
 
     def generate_uuid(self):
         return str(uuid.uuid4())

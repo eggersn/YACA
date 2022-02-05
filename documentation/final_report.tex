@@ -67,10 +67,10 @@ The protocol above can now be extended to support causal ordering by using the s
 \end{enumerate}
 are satisfied. The proof of correctness is identical to the one given in \cite[p.~658]{ds_book}.
 
-\subsubsection{Suspicion Protocol}
+\subsection{Suspicion Protocol}
 When having malicious servers in our system it is advantageous to have a protocol that is able to suspend them, if inconsistent or incorrect behavior is detected. In this context, suspending a server means that no more incoming messages are accepted anymore, or to be more exact, no new message is accepted from the suspended server that was not already acknowledged by another server. This can easily be achieved by using digital signatures and only accepting messages that are gathered via negative acknowledgements. 
 
-One straight-forward strategy to achieve an agreed suspension is to send \textit{suspect messages} to all other servers and suspend a server as soon as at least one suspect message has arrived. To avoid having a malicious server sending suspect messages for all servers and suspending them, we modify this protocol to allow for $f < n/3$ malicious servers (since we utilize the Phase-King algorithm this limit is of course capped by $f < \lceil n/4 \rceil$):
+One straight-forward strategy to achieve an agreed suspension is to send \textit{suspect messages} to all other servers and suspend a server as soon as at least one suspect message has arrived. To avoid having a malicious server sending suspect messages for all servers and suspending them, we modify this protocol to allow for $f < n/3$ malicious servers (since we utilize the Phase-King algorithm this limit is of course capped by $f < n/4$):
 \begin{itemize}
     \item If detecting inconsistent or incorrect behavior (e.g. timeout on response), send a suspect message. The suspect message contains the suspected server identification and the reason why the server is suspected (e.g. ''proposal timeout on \textit{msg\_id}'' for the ISIS algorithm).
     \item If a server gathers more than $f$ suspect messages for the same server and the same reason, he sends a suspect message himself if he did not already send one.
@@ -78,21 +78,21 @@ One straight-forward strategy to achieve an agreed suspension is to send \textit
 \end{itemize}
 For the proof of correctness, it is easy to see that if a server gathers $n-f$ suspect messages, he can be sure that all other correct processes gather at least $n-2f > f$ (for $f < n/3$) suspect messages of the same kind. Thus, eventually, every correct process eventually sends a suspect message and suspends the server. On the other hand, if a server receives at least $f$ suspect messages, he can be sure that at least one correct (or honest) server is suspecting the accused server.
 
-\subsubsection{Phase-King Algorithm}
+\subsection{Consensus}
 Generally, we implement the Phase-King algorithm, as presented in the lecture, on top of CO-R-multicast, which ensures that the messages of different rounds are separated more elegantly. Furthermore, we use the suspicion protocol described above if a server detects a timeout while waiting for a message. Then, the accused server is either suspended by all correct servers, or the missing message is eventually delivered by using negative acknowledgements.
 
 Furthermore, we ensure that the Phase-King algorithm is only executed when each correct server has the same group-view. During the execution, we therefore do not allow new servers to join (TODO reference). 
 
-\subsubsection{Total-Ordered Reliable Multicast (TO-R-Multicast)}
-We build TO-R-multicast on top of CO-R-multicast using the ISIS algorithm described in \cite[p.~655-656]{ds_book}. We use CO-R-multicast for the following three reasons:
-\begin{enumerate}
-    \item[i)] Proposal messages are delivered after the original message
-    \item[ii)] To support our JOIN mechanisms of new servers (TODO reference)
-    \item[iii)] To perform the Max-Phase-King algorithm (cf. \Cref{appendix:maxphaseking}) on the agreed sequence numbers   
-\end{enumerate}
-This, however, does not guarantee that the total-ordered messages satisfy causal-ordering as well.
+% \subsection{Total-Ordered Reliable Multicast (TO-R-Multicast)}
+% We build TO-R-multicast on top of CO-R-multicast using the ISIS algorithm described in \cite[p.~655-656]{ds_book}. We use CO-R-multicast for the following three reasons:
+% \begin{enumerate}
+%     \item[i)] Proposal messages are delivered after the original message
+%     \item[ii)] To support our JOIN mechanisms of new servers (TODO reference)
+%     \item[iii)] To perform the Max-Phase-King algorithm (cf. \Cref{appendix:maxphaseking}) on the agreed sequence numbers   
+% \end{enumerate}
+% This, however, does not guarantee that the total-ordered messages satisfy causal-ordering as well.
 
-Each server $p$ maintains variables $P_g^p$ and $A_g^p$. Upon sending a message via TO-R-multicast, the sender adds a randomly generated message ID and CO-R-multicasts it. When a server CO-R-delivers such a message, he responds with a proposal $P_g^p = max(A_g^p, P_g^p)+1$ for the message's sequence number. This is also done via CO-R-multicast, as opposed to unicast \cite[p.~655-656]{ds_book}. This allows us to use the Max-Phase-King algorithm directly as described in \Cref{appendix:maxphaseking}. 
+% Each server $p$ maintains variables $P_g^p$ and $A_g^p$. Upon sending a message via TO-R-multicast, the sender adds a randomly generated message ID and CO-R-multicasts it. When a server CO-R-delivers such a message, he responds with a proposal $P_g^p = max(A_g^p, P_g^p)+1$ for the message's sequence number. This is also done via CO-R-multicast, as opposed to unicast \cite[p.~655-656]{ds_book}. This allows us to use the Max-Phase-King algorithm directly as described in \Cref{appendix:maxphaseking}. 
 
 %
 % ---- Bibliography ----

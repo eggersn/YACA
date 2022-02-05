@@ -27,8 +27,8 @@
     },
     "multicast": {
         "addr": "224.3.115.1",
-        "client_port": 33984,
-        "database_port": 30495,
+        "client_read_port": 33984,
+        "client_write_port": 30495,
         "announcement_port": 5042,
         "consensus_port": 35090
     },
@@ -42,5 +42,8 @@
     },
     "crash_fault_detection": {
         "timeout": 3
+    },
+    "client": {
+        "polling_rate": 0.5
     }
 }

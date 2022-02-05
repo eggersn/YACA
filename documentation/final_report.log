@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.22 (TeX Live 2021/Arch Linux) (preloaded format=pdflatex 2021.11.25)  31 JAN 2022 14:39
+This is pdfTeX, Version 3.141592653-2.6-1.40.22 (TeX Live 2021/Arch Linux) (preloaded format=pdflatex 2021.11.25)  4 FEB 2022 14:15
 entering extended mode
  restricted \write18 enabled.
  file:line:error style messages enabled.
@@ -310,12 +310,7 @@ LaTeX Font Info:    Trying to load font information for U+msb on input line 29.
 File: umsb.fd 2013/01/14 v3.01 AMS symbols B
 ) [1
 
-{/var/lib/texmf/fonts/map/pdftex/updmap/pdftex.map}]
-Overfull \hbox (4.60144pt too wide) in paragraph at lines 63--64
- \OT1/cmr/bx/n/10 Causal-Ordered Re-li-able Mul-ti-cast (CO-R-Multicast)[] \OT1/cmr/m/n/10 The pro-to-col above
- []
-
-[2] (/home/simon/Documents/sharedfolder/Semester_7/DistributedSystems/Project_new/documentation/final_report.bbl [3]) [4] (/usr/share/texmf-dist/tex/latex/listings/lstlang1.sty
+{/var/lib/texmf/fonts/map/pdftex/updmap/pdftex.map}] [2] [3] (/home/simon/Documents/sharedfolder/Semester_7/DistributedSystems/Project_new/documentation/final_report.bbl) [4] (/usr/share/texmf-dist/tex/latex/listings/lstlang1.sty
 File: lstlang1.sty 2020/03/24 1.8d listings language file
 ) (/usr/share/texmf-dist/tex/latex/listings/lstlang1.sty
 File: lstlang1.sty 2020/03/24 1.8d listings language file
@@ -328,13 +323,13 @@ LaTeX Font Info:    Font shape `OT1/cmtt/bx/n' in size <10> not available
 Here is how much of TeX's memory you used:
  6219 strings out of 478994
  98039 string characters out of 5864750
- 687472 words of memory out of 5000000
+ 687421 words of memory out of 5000000
  23666 multiletter control sequences out of 15000+600000
  408110 words of font info for 45 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
  68i,9n,74p,828b,1152s stack positions out of 5000i,500n,10000p,200000b,80000s
 </usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx10.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx12.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmex10.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi10.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi5.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi7.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmr10.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmr5.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmr7.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmr9.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmss10.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy7.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmti10.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmti9.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmtt10.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/symbols/msbm10.pfb>
-Output written on /home/simon/Documents/sharedfolder/Semester_7/DistributedSystems/Project_new/documentation/final_report.pdf (7 pages, 211713 bytes).
+Output written on /home/simon/Documents/sharedfolder/Semester_7/DistributedSystems/Project_new/documentation/final_report.pdf (7 pages, 211947 bytes).
 PDF statistics:
  96 PDF objects out of 1000 (max. 8388607)
  69 compressed objects within 1 object stream

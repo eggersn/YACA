@@ -28,7 +28,6 @@ class Server:
     def __init__(self, initial=False, i=0, verbose=False):
         self.__verbose = verbose
         self._client_channel = Channel()
-        self._db_channel = Channel()
         self._announcement_channel = Channel()
         self._consensus_channel = Channel()
         self._discovery_channel = Channel()
@@ -55,32 +54,33 @@ class Server:
             discovery = ServerDiscovery(self._configuration)
             discovery.discover(self._group_view, self._signature, self._client_channel)
 
-        # open reliable multicast for clients to make byzantine fault tolerant queries
-        self._client_request_multicast = ReliableMulticast(
+        # multicast handler for group messages (reliable causal ordered multicast)
+        self._client_write_multicast = CausalOrderedReliableMulticast(
             self._configuration.get_multicast_addr(),
-            self._configuration.get_client_multicast_port(),
+            self._configuration.get_client_write_multicast_port(),
             self._group_view.identifier,
             self._client_channel,
             self._group_view,
             self._configuration,
             open=True,
         )
-        self._client_request_multicast.start()
+        self._client_write_multicast.start()
 
-        self._client_processing = ClientRequestsProcessing(
-            self._client_channel, self._group_view, self._configuration
-        )
-
-        # multicast handler for the database (reliable causal ordered multicast)
-        self._db_multicast = CausalOrderedReliableMulticast(
+        # open reliable multicast for clients to make queries
+        self._client_read_multicast = ReliableMulticast(
             self._configuration.get_multicast_addr(),
-            self._configuration.get_db_multicast_port(),
+            self._configuration.get_client_read_multicast_port(),
             self._group_view.identifier,
-            self._db_channel,
+            self._client_channel,
             self._group_view,
             self._configuration,
+            open=True,
         )
-        self._db_multicast.start()
+        self._client_read_multicast.start()
+
+        self._client_processing = ClientRequestsProcessing(
+            self._client_channel, self._client_write_multicast, self._group_view, self._configuration
+        )
 
         # multicast handler for consensus (reliable causal ordered multicast)
         self._consensus_multicast = CausalOrderedReliableMulticast(
@@ -131,7 +131,7 @@ class Server:
             self._discovery_listener,
             self._group_view,
             self._announcement_multicast,
-            self._db_multicast,
+            self._client_write_multicast,
             self._configuration,
         )
 
@@ -159,24 +159,28 @@ class Server:
         self._udp_sender = UnicastSender(self._configuration)
         while True:
             time.sleep(self._configuration.get_heartbeat_interval())
-            ts = time.time_ns() / 10 ** 9
+            ts = time.time_ns() / 10**9
             ping_msg = PingMessage.initFromData()
             for server in self._group_view.servers:
-                if server in suspected_servers and ts - suspected_servers[server] > self._configuration.get_timeout():
+                if (
+                    server in suspected_servers
+                    and ts - suspected_servers[server] > self._configuration.get_timeout()
+                ):
                     del suspected_servers[server]
-                    
-                if not self._group_view.check_if_server_is_inactive(server) and server not in suspected_servers:
+
+                if (
+                    not self._group_view.check_if_server_is_inactive(server)
+                    and server not in suspected_servers
+                ):
                     addr = self._group_view.get_unicast_addr_of_server(server)
                     is_active = self._udp_sender.send_udp_sync(ping_msg, addr)
 
                     if not is_active:
-                        suspect_msg = GroupViewSuspect.initFromData(
-                            server, "Timeout#{}".format(server)
-                        )
+                        suspect_msg = GroupViewSuspect.initFromData(server, "Timeout#{}".format(server))
                         suspect_msg.encode()
 
                         self._announcement_multicast.send(suspect_msg)
-                        suspected_servers[server] =  ts
+                        suspected_servers[server] = ts
 
                 # self._group_view.wait_for_manager_to_be_elected()
 

@@ -16,8 +16,9 @@ class CausalOrderedReliableMulticast(ReliableMulticast):
         channel: Channel,
         group_view: GroupView,
         configuration: Configuration,
+        open: bool = False
     ):
-        super().__init__(multicast_addr, multicast_port, identifier, channel, group_view, configuration)
+        super().__init__(multicast_addr, multicast_port, identifier, channel, group_view, configuration, open)
 
         self._co_holdback_queue: list[tuple[dict[str, int], str]] = []
         self._co_lock = threading.Lock()

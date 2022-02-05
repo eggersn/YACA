@@ -48,7 +48,7 @@ class Message:
 
         identifier = self.meta["signature"][0]
         
-        if not group_view.check_if_participant(identifier):
+        if group_view is not None and not group_view.check_if_participant(identifier):
             if "HeartBeat" not in self.header:
                 print("Signature: Not participant of group", identifier)
             return False

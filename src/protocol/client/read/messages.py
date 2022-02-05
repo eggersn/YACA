@@ -1,6 +1,6 @@
 from src.protocol.base import Message
 
-class NegativeAcknowledgement(Message):
+class MessageQuery(Message):
 
     def __init__(self):
         super().__init__()
@@ -17,7 +17,7 @@ class NegativeAcknowledgement(Message):
     @classmethod
     def initFromData(cls, nacks):
         message = cls()
-        message.header = "NACK"
+        message.header = "Query: Messages"
         message.meta = {}
         message.nacks = nacks.copy()
 

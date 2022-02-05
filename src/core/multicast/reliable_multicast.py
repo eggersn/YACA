@@ -55,6 +55,7 @@ class ReliableMulticast:
         self._storage = {identifier: []}
 
         self._timeoffset = time.time_ns() / 10 ** 9
+        self._last_msg_sent_ts = 0
 
         self._suspend_multicast = False
         self._contraint_multicast = False
@@ -97,6 +98,7 @@ class ReliableMulticast:
                 if not self._open:
                     pb_message.sign(self._signature)
 
+                self._last_msg_sent_ts = time.time_ns() / 10 ** 9
                 self._udp_sock.sendto(
                     pb_message.json_data.encode(), (self._multicast_addr, self._multicast_port)
                 )
@@ -163,6 +165,8 @@ class ReliableMulticast:
         interval = self._configuration.get_heartbeat_interval()
         while not self.terminate:
             time.sleep(interval)
+            ts = time.time_ns() / 10 ** 9
+            # if ts - self._last_msg_sent_ts <= 5*interval:
             heartbeat = HeartBeat.initFromData(self._R_g)
             heartbeat.encode()
             if not self._open:
@@ -283,6 +287,7 @@ class ReliableMulticast:
             check_responses = True
 
         elif pb_message.seqno > self._R_g[pb_message.identifier] + 1:
+            print("b", data)
             # there are missing messages => store message in holdback queue
             with self._holdback_queue_lock:
                 self._holdback_queue[pb_message.identifier][pb_message.seqno] = data
@@ -358,6 +363,45 @@ class ReliableMulticast:
                             nack_messages[identifier][-1],
                         )
             self._send_nack(nack_messages, addr)
+
+    def _handle_acks_open(self, acks, addr, nack_messages):
+        # send nacks if detecting missing messages
+        for ack in acks:
+            if ack != self._identifier:
+                if ack not in self._storage:
+                    self._storage[ack] = []
+                    self._R_g[ack] = -1
+                    self._holdback_queue[ack] = {}
+                    self._requested_messages[ack] = [0, -1]
+
+                if (
+                    self._requested_messages[ack][0] + self._configuration.get_heartbeat_interval()
+                    < time.time_ns() / 10 ** 6
+                ):
+                    self._requested_messages[ack][1] = self._R_g[ack]
+
+                missing_messages = list(
+                    set(range(self._requested_messages[ack][1] + 1, acks[ack] + 1))
+                    - set(self._holdback_queue[ack].keys())
+                )
+
+                if len(missing_messages) != 0:
+                    nack_messages[ack] = missing_messages
+
+        if len(nack_messages) > 0:
+            nack_count = sum([len(nack_messages[identifier]) for identifier in nack_messages])
+            if nack_count > 100:
+                for identifier in nack_messages:
+                    l = len(nack_messages[identifier])
+                    nack_messages[identifier] = nack_messages[identifier][: int(100 * l / nack_count)]
+
+                    l = len(nack_messages[identifier])
+                    if l > 0:
+                        self._requested_messages[identifier][1] = max(
+                            self._requested_messages[identifier][1],
+                            nack_messages[identifier][-1],
+                        )
+            return nack_messages
 
     def _deliver(self, data, identifier, seqno):
         if self._channel is not None:

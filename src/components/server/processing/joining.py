@@ -43,6 +43,7 @@ class JoinProcessing:
         finished = False 
         while not finished:
             data = self._channel.consume()
+            print(data)
             finished = self._process_request(data)
 
         self._group_view.flag_ready_to_join()

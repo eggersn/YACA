@@ -27,13 +27,16 @@ class UDPUnicastListener:
             data, addr = self._listener.recvfrom(1024)
             data = data.decode()
 
-            if "Ping" not in data:
-                # write data to channel to be consumed by db_server
-                self._request_channel.produce(data)
-
             # handle acks 
             msg = Message.initFromJSON(data)
             msg.decode()
+            msg.set_sender(addr)
+            msg.encode()
+
+            if "Ping" not in data:
+                # write data to channel to be consumed by db_server
+                self._request_channel.produce(msg.json_data)
+
 
             if msg.has_nonce:
                 response = Message.initFromData("ACK", meta={"nonce": msg.get_nonce()})
