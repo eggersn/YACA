@@ -42,15 +42,15 @@ class Message:
         self.content = data["content"]
         self.meta = data["meta"]
 
-    def verify_signature(self, sk: Signatures, group_view: GroupView):
+    def verify_signature(self, sk: Signatures, pk_dict):
         if not self.is_decoded:
             self.decode()
 
+        if "signature" not in self.meta:
+            return False
         identifier = self.meta["signature"][0]
         
-        if group_view is not None and not group_view.check_if_participant(identifier):
-            if "HeartBeat" not in self.header:
-                print("Signature: Not participant of group", identifier)
+        if identifier not in pk_dict:
             return False
 
         signature = base64.b64decode(self.meta["signature"][1])
@@ -58,11 +58,11 @@ class Message:
             {
                 "header": self.header,
                 "content": self.content,
-                "meta": {k: self.meta[k] for k in self.meta if k != "signature"},
+                "meta": {k: self.meta[k] for k in self.meta if k not in ["signature", "sender"]},
             }
         ).encode()
 
-        valid = sk.check_validity(data, signature, group_view.pks[identifier])
+        valid = sk.check_validity(data, signature, pk_dict[identifier])
 
         return valid
 

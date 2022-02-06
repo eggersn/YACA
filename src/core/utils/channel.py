@@ -18,6 +18,8 @@ class Channel:
 
     def produce(self, msg, topic="", trash=False):
         if not self._trash:
+            if topic != "" and topic not in self._topic_queues:
+                self.create_topic(topic)
             with self._locks[topic]:
                 self._topic_queues[topic].append((msg, trash))
                 self._semaphores[topic].release()

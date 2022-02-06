@@ -83,7 +83,7 @@ class JoinProcessing:
 
         # verify signatures requires that the new server is added to the group view. If invalid, we simply suspend the server again
         # note that, due to the phaseking algorithm before, all honest servers suspend the server if at least one honest server does so
-        if not join_request.verify_signature(self._signature, self._group_view):
+        if not join_request.verify_signature(self._signature, self._group_view.pks):
             self._group_view.suspend_server(join_request.identifier)
             return False 
 

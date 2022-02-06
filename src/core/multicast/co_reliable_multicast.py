@@ -64,11 +64,9 @@ class CausalOrderedReliableMulticast(ReliableMulticast):
             k = 0
             while k < len(self._co_holdback_queue):
                 (seqno_dict, data) = self._co_holdback_queue[k]
-
                 if self._check_if_ready_to_deliver(seqno_dict):
                     pb_message = PiggybackMessage.initFromJSON(data)
                     pb_message.decode()
-
                     self._co_deliver(data, pb_message.identifier, pb_message.seqno)
                     self._CO_R_g[pb_message.identifier] = pb_message.seqno
                     self._co_holdback_queue.pop(k)
@@ -76,7 +74,7 @@ class CausalOrderedReliableMulticast(ReliableMulticast):
                 else:
                     k += 1
 
-    def send(self, message: Message, config=False):
+    def send(self, message: Message, config=False, sign=True):
         if not message.is_decoded:
             message.decode()
 
@@ -86,7 +84,7 @@ class CausalOrderedReliableMulticast(ReliableMulticast):
                     pb_message = PiggybackMessage.initFromMessage(message, self._identifier, self._S_p, self._CO_R_g)
                     pb_message.encode()
 
-                if not self._open:
+                if sign:
                     pb_message.sign(self._signature)
 
                 self._udp_sock.sendto(

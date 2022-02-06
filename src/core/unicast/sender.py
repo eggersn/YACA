@@ -10,12 +10,15 @@ from src.protocol.base import Message
 
 
 class UnicastSender:
-    def __init__(self, configuration: Configuration):
+    def __init__(self, configuration: Configuration, sending_socket=None):
         self._configuration = configuration
         self._storage = {}
         self._storage_semaphore = threading.Semaphore(0)
 
-        self.upd_sender = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        if sending_socket is None:
+            self.upd_sender = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        else:
+            self.upd_sender = sending_socket
 
     def _ack_sender(self):
         while True:

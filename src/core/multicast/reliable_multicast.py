@@ -54,7 +54,7 @@ class ReliableMulticast:
 
         self._storage = {identifier: []}
 
-        self._timeoffset = time.time_ns() / 10 ** 9
+        self._timeoffset = time.time_ns() / 10**9
         self._last_msg_sent_ts = 0
 
         self._suspend_multicast = False
@@ -86,7 +86,7 @@ class ReliableMulticast:
         self._udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._udp_sock.bind(("", 0))
 
-    def send(self, message: Message, config=False):
+    def send(self, message: Message, config=False, sign=True):
         if not message.is_decoded:
             message.decode()
 
@@ -95,10 +95,10 @@ class ReliableMulticast:
                 pb_message = PiggybackMessage.initFromMessage(message, self._identifier, self._S_p, self._R_g)
                 pb_message.encode()
 
-                if not self._open:
+                if sign:
                     pb_message.sign(self._signature)
 
-                self._last_msg_sent_ts = time.time_ns() / 10 ** 9
+                self._last_msg_sent_ts = time.time_ns() / 10**9
                 self._udp_sock.sendto(
                     pb_message.json_data.encode(), (self._multicast_addr, self._multicast_port)
                 )
@@ -165,7 +165,7 @@ class ReliableMulticast:
         interval = self._configuration.get_heartbeat_interval()
         while not self.terminate:
             time.sleep(interval)
-            ts = time.time_ns() / 10 ** 9
+            ts = time.time_ns() / 10**9
             # if ts - self._last_msg_sent_ts <= 5*interval:
             heartbeat = HeartBeat.initFromData(self._R_g)
             heartbeat.encode()
@@ -191,7 +191,7 @@ class ReliableMulticast:
                 if msg.header == "HeartBeat":
                     self._receive_heartbeat(data, addr)
                 else:
-                    if msg.verify_signature(self._signature, self._group_view):
+                    if msg.verify_signature(self._signature, self._group_view.pks):
                         if msg.header == "NACK":
                             if not self._group_view.check_if_server_is_suspended(sender_id):
                                 self._receive_nack(data, addr)
@@ -214,16 +214,19 @@ class ReliableMulticast:
                 if msg.header == "HeartBeat":
                     self._receive_heartbeat(data, addr)
                 elif msg.header == "NACK":
-                    if msg.verify_signature(self._signature, self._group_view):
+                    if msg.verify_signature(self._signature, self._group_view.pks):
                         sender_id, _ = msg.get_signature()
                         if not self._group_view.check_if_server_is_inactive(sender_id):
                             self._receive_nack(data, addr)
                 else:
-                    msg.set_sender(addr)
-                    msg.encode()
-                    data = msg.json_data
+                    msg = PiggybackMessage.initFromJSON(data)
+                    msg.decode()
+                    if msg.seqno == 0 or msg.verify_signature(self._signature, self._group_view.users):
+                        msg.set_sender(addr)
+                        msg.encode()
+                        data = msg.json_data
 
-                    self._receive_pb_message(data, addr)
+                        self._receive_pb_message(data, addr)
 
     def _listen_for_nacks(self):
         while not self.terminate:
@@ -287,7 +290,6 @@ class ReliableMulticast:
             check_responses = True
 
         elif pb_message.seqno > self._R_g[pb_message.identifier] + 1:
-            print("b", data)
             # there are missing messages => store message in holdback queue
             with self._holdback_queue_lock:
                 self._holdback_queue[pb_message.identifier][pb_message.seqno] = data
@@ -295,7 +297,7 @@ class ReliableMulticast:
                 if (
                     self._requested_messages[pb_message.identifier][0]
                     + self._configuration.get_heartbeat_interval()
-                    < time.time_ns() / 10 ** 6
+                    < time.time_ns() / 10**9
                 ):
                     self._requested_messages[pb_message.identifier][1] = self._R_g[pb_message.identifier]
 
@@ -337,7 +339,7 @@ class ReliableMulticast:
 
                     if (
                         self._requested_messages[ack][0] + self._configuration.get_heartbeat_interval()
-                        < time.time_ns() / 10 ** 6
+                        < time.time_ns() / 10**9
                     ):
                         self._requested_messages[ack][1] = self._R_g[ack]
 
@@ -356,52 +358,15 @@ class ReliableMulticast:
                     l = len(nack_messages[identifier])
                     nack_messages[identifier] = nack_messages[identifier][: int(100 * l / nack_count)]
 
-                    l = len(nack_messages[identifier])
-                    if l > 0:
-                        self._requested_messages[identifier][1] = max(
-                            self._requested_messages[identifier][1],
-                            nack_messages[identifier][-1],
-                        )
+            for identifier in nack_messages:
+                l = len(nack_messages[identifier])
+                if l > 0:
+                    self._requested_messages[identifier][0] = time.time_ns() / 10**9
+                    self._requested_messages[identifier][1] = max(
+                        self._requested_messages[identifier][1],
+                        nack_messages[identifier][-1],
+                    )
             self._send_nack(nack_messages, addr)
-
-    def _handle_acks_open(self, acks, addr, nack_messages):
-        # send nacks if detecting missing messages
-        for ack in acks:
-            if ack != self._identifier:
-                if ack not in self._storage:
-                    self._storage[ack] = []
-                    self._R_g[ack] = -1
-                    self._holdback_queue[ack] = {}
-                    self._requested_messages[ack] = [0, -1]
-
-                if (
-                    self._requested_messages[ack][0] + self._configuration.get_heartbeat_interval()
-                    < time.time_ns() / 10 ** 6
-                ):
-                    self._requested_messages[ack][1] = self._R_g[ack]
-
-                missing_messages = list(
-                    set(range(self._requested_messages[ack][1] + 1, acks[ack] + 1))
-                    - set(self._holdback_queue[ack].keys())
-                )
-
-                if len(missing_messages) != 0:
-                    nack_messages[ack] = missing_messages
-
-        if len(nack_messages) > 0:
-            nack_count = sum([len(nack_messages[identifier]) for identifier in nack_messages])
-            if nack_count > 100:
-                for identifier in nack_messages:
-                    l = len(nack_messages[identifier])
-                    nack_messages[identifier] = nack_messages[identifier][: int(100 * l / nack_count)]
-
-                    l = len(nack_messages[identifier])
-                    if l > 0:
-                        self._requested_messages[identifier][1] = max(
-                            self._requested_messages[identifier][1],
-                            nack_messages[identifier][-1],
-                        )
-            return nack_messages
 
     def _deliver(self, data, identifier, seqno):
         if self._channel is not None:
@@ -413,7 +378,7 @@ class ReliableMulticast:
         self._storage[identifier].append(data)
         self._R_g[identifier] = seqno
         if identifier != self._identifier:
-            self._requested_messages[identifier][0] = time.time_ns() / 10 ** 6
+            self._requested_messages[identifier][0] = time.time_ns() / 10**9
             self._requested_messages[identifier][1] = max(seqno, self._requested_messages[identifier][1])
 
     def _check_holdback_queue(self):

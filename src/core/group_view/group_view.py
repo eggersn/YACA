@@ -20,6 +20,7 @@ class GroupView:
         self.servers = []
         self.suspended_servers = []
         self.joining_servers = []
+        self.users = {}
 
         self.identifier: str
         self.manager: str
@@ -105,6 +106,7 @@ class GroupView:
             self.servers.append(identifier)
             self.joining_servers.append(identifier)
             self.pks[identifier] = pk
+            self.users[identifier] = pk
             self.ip_addrs[identifier] = ip_addr
             self.ports[identifier] = port
 
@@ -143,6 +145,7 @@ class GroupView:
         for identifier in data["pks"]:
             pk_encoded = data["pks"][identifier]
             group_view.pks[identifier] = VerifyKey(base64.b64decode(pk_encoded))
+            group_view.users[identifier] = VerifyKey(base64.b64decode(pk_encoded))
             group_view.ip_addrs[identifier] = data["ip_addrs"][identifier]
             group_view.ports[identifier] = data["ports"][identifier]
 
@@ -164,6 +167,7 @@ class GroupView:
         else:
             group_view.ports[group_view.identifier] = port
         group_view.pks[group_view.identifier] = group_view.sk.verify_key
+        group_view.users[group_view.identifier] = group_view.sk.verify_key
 
         # load global group view file, containing the information of the initial participants
         f = open(global_file)
@@ -174,6 +178,7 @@ class GroupView:
         for identifier in data["pks"]:
             pk_encoded = data["pks"][identifier]
             group_view.pks[identifier] = VerifyKey(base64.b64decode(pk_encoded))
+            group_view.users[identifier] = VerifyKey(base64.b64decode(pk_encoded))
             group_view.ip_addrs[identifier] = data["ip_addrs"][identifier]
             group_view.ports[identifier] = data["ports"][identifier]
             group_view.servers.append(identifier)
