@@ -1,4 +1,3 @@
-## Configuration
 # YACA: Yet Another Chat Application
 *YACA* is *yet another chat application* aiming to cover the project requirements: Dynamic discovery, leader election, reliable ordered multicast, and Byzantine fault tolerance.
 
