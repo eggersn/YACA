@@ -24,6 +24,8 @@ Afterwards, you can launch multiple clients by running:
 $ python client.py
 ```
 
-## License
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+## Documentation
+Theoretical background can be found [here](https://github.com/eggersn/YACA/blob/master/documentation/final_report.pdf). See Appendix A, for a detailed description of the proposed Max-Phase-King algorithm.
+
+## License [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 This project is distributed under the MIT license. Please see LICENSE file.
