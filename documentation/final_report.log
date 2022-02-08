@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.22 (TeX Live 2021/Arch Linux) (preloaded format=pdflatex 2021.11.25)  4 FEB 2022 14:15
+This is pdfTeX, Version 3.141592653-2.6-1.40.22 (TeX Live 2021/Arch Linux) (preloaded format=pdflatex 2021.11.25)  8 FEB 2022 14:32
 entering extended mode
  restricted \write18 enabled.
  file:line:error style messages enabled.
@@ -308,9 +308,22 @@ File: umsa.fd 2013/01/14 v3.01 AMS symbols A
 LaTeX Font Info:    Trying to load font information for U+msb on input line 29.
  (/usr/share/texmf-dist/tex/latex/amsfonts/umsb.fd
 File: umsb.fd 2013/01/14 v3.01 AMS symbols B
-) [1
+)
 
-{/var/lib/texmf/fonts/map/pdftex/updmap/pdftex.map}] [2] [3] (/home/simon/Documents/sharedfolder/Semester_7/DistributedSystems/Project_new/documentation/final_report.bbl) [4] (/usr/share/texmf-dist/tex/latex/listings/lstlang1.sty
+pdfTeX warning: pdflatex (file /home/simon/Documents/sharedfolder/Semester_7/DistributedSystems/Project_new/documentation/graphics/DS_Architecture.pdf): PDF inclusion: found PDF version <1.7>, but at most version <1.5> allowed
+<graphics/DS_Architecture.pdf, id=1, 280.1667pt x 174.6525pt>
+File: graphics/DS_Architecture.pdf Graphic file (type pdf)
+<use graphics/DS_Architecture.pdf>
+Package pdftex.def Info: graphics/DS_Architecture.pdf  used on input line 50.
+(pdftex.def)             Requested size: 196.11534pt x 122.2559pt.
+[1
+
+{/var/lib/texmf/fonts/map/pdftex/updmap/pdftex.map}] [2 </home/simon/Documents/sharedfolder/Semester_7/DistributedSystems/Project_new/documentation/graphics/DS_Architecture.pdf>] [3] [4] [5]
+Overfull \hbox (4.60144pt too wide) in paragraph at lines 130--131
+ \OT1/cmr/bx/n/10 Causal-Ordered Re-li-able Mul-ti-cast (CO-R-Multicast)[] \OT1/cmr/m/n/10 The pro-to-col above
+ []
+
+[6] (/usr/share/texmf-dist/tex/latex/listings/lstlang1.sty
 File: lstlang1.sty 2020/03/24 1.8d listings language file
 ) (/usr/share/texmf-dist/tex/latex/listings/lstlang1.sty
 File: lstlang1.sty 2020/03/24 1.8d listings language file
@@ -318,21 +331,21 @@ File: lstlang1.sty 2020/03/24 1.8d listings language file
 File: lstmisc.sty 2020/03/24 1.8d (Carsten Heinz)
 )
 LaTeX Font Info:    Font shape `OT1/cmtt/bx/n' in size <10> not available
-(Font)              Font shape `OT1/cmtt/m/n' tried instead on input line 119.
- [5] [6] [7] (/home/simon/Documents/sharedfolder/Semester_7/DistributedSystems/Project_new/documentation/final_report.aux) ) 
+(Font)              Font shape `OT1/cmtt/m/n' tried instead on input line 170.
+ [7] [8] [9] [10] (/home/simon/Documents/sharedfolder/Semester_7/DistributedSystems/Project_new/documentation/final_report.bbl) [11] [12] [13] [14] [15] [16] (/home/simon/Documents/sharedfolder/Semester_7/DistributedSystems/Project_new/documentation/final_report.aux) ) 
 Here is how much of TeX's memory you used:
- 6219 strings out of 478994
- 98039 string characters out of 5864750
- 687421 words of memory out of 5000000
- 23666 multiletter control sequences out of 15000+600000
- 408110 words of font info for 45 fonts, out of 8000000 for 9000
+ 6302 strings out of 478994
+ 99349 string characters out of 5864750
+ 691264 words of memory out of 5000000
+ 23740 multiletter control sequences out of 15000+600000
+ 411221 words of font info for 57 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
- 68i,9n,74p,828b,1152s stack positions out of 5000i,500n,10000p,200000b,80000s
-</usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx10.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx12.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmex10.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi10.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi5.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi7.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmr10.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmr5.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmr7.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmr9.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmss10.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy7.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmti10.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmti9.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmtt10.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/symbols/msbm10.pfb>
-Output written on /home/simon/Documents/sharedfolder/Semester_7/DistributedSystems/Project_new/documentation/final_report.pdf (7 pages, 211947 bytes).
+ 68i,11n,74p,1242b,1698s stack positions out of 5000i,500n,10000p,200000b,80000s
+</usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx10.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx12.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx9.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmex10.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi10.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi5.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi7.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi9.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmr10.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmr5.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmr6.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmr7.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmr9.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmss10.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy7.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmti10.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmti9.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmtt10.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/symbols/msbm10.pfb>
+Output written on /home/simon/Documents/sharedfolder/Semester_7/DistributedSystems/Project_new/documentation/final_report.pdf (16 pages, 304039 bytes).
 PDF statistics:
- 96 PDF objects out of 1000 (max. 8388607)
- 69 compressed objects within 1 object stream
+ 146 PDF objects out of 1000 (max. 8388607)
+ 103 compressed objects within 2 object streams
  0 named destinations out of 1000 (max. 500000)
- 1 words of extra memory for PDF output out of 10000 (max. 10000000)
+ 6 words of extra memory for PDF output out of 10000 (max. 10000000)
 

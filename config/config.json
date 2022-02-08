@@ -26,7 +26,7 @@
         "path": "initial"
     },
     "multicast": {
-        "addr": "224.3.115.1",
+        "addr": "224.0.0.42",
         "client_read_port": 33984,
         "client_write_port": 30495,
         "announcement_port": 5042,
