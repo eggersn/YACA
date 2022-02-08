@@ -22,16 +22,83 @@
 %
 \title{YACA: Yet Another Chat Application}
 
-\author{Group 23: Simon Egger \and Nicolai Krebs}
+\author{Group 23: Simon Egger}
 
 \institute{}
 %
 \maketitle              % typeset the header of the contribution
 
+\section{Introduction}
+\textit{YACA} is \textit{yet another chat application}\footnote{\url{https://github.com/eggersn/YACA}} aiming to cover the project requirements: Dynamic discovery, leader election, reliable ordered multicast, and Byzantine fault tolerance. \cite{Egger2021}
 
-\section{Implementation}
+YACA uses the client-server architecture to enable clients to participate in one global chat room, where clients are able to respond to previous messages (i.e. the happened-before relation is respected). In general, our strategy is to utilize powerful building blocks like \textit{total-ordered reliable multicast}, \textit{view-synchronous group communication}, and the \textit{(Max-)Phase-King Algorithm} to realize this project in a Byzantine fault-tolerant manner.
 
-\subsection{Primitives}
+This report starts with an overview in \Cref{sec:req_analysis}, how our project is able to fulfill the project requirements. Afterwards, \Cref{sec:arch_design} provides a high-level description of our architecture design, whereupon \Cref{sec:implementation} provides a more detailed description of our building blocks. We conclude in \Cref{sec:conclusion}. Furthermore, we design the \textit{Max-Phase-King Algorithm}, where \Cref{appendix} provides additional details and proofs of correctness. 
+
+\section{Project Requirement Analysis} \label{sec:req_analysis}
+\begin{enumerate}
+    \item[1.] \textit{Dynamic Discovery:} We realize view-synchronous group communication (cf. \Cref{sec:view_sync_comm}). Servers use this mechanism to ensure they manage a consistent group-view, which is for example required for TO-R-multicast and the (max-)phase-king algorithm.
+    \item[2.] \textit{Leader Election:} We use the more powerful phase-king algorithm to realize our election algorithm (cf. \Cref{sec:election}). We elect a \textit{Manager (MGR)} among the servers, which is responsible for listening to new join requests via broadcast. 
+    \item[3.] \textit{Reliable Ordered Multicast:} We realize causal- and total-ordered reliable multicast (cf. \Cref{sec:primitives}, \Cref{sec:to_multicast}). We use CO-R-multicast for sending group chat messages, executing the election and phase-king algorithm, and realizing the hold-mechanism of our view-synchronous group communication implementation. We use TO-R-multicast to deliver election announcements and join messages of new servers to ensure the \textit{agreement} and \textit{order} guarantee of view-synchronous group communication.
+    \item[4.] \textit{Fault Tolerance:} We aim to provide Byzantine fault-tolerance. We describe in \Cref{sec:implementation} how the individual building blocks of our implementation are realized to ensure Byzantine fault-tolerance. Furthermore, we use active replication to replicate the group chat messages.
+\end{enumerate}
+
+\section{Architecture Design} \label{sec:arch_design}
+
+\begin{figure}[b]
+    \centering
+    \includegraphics[scale=0.7]{graphics/DS_Architecture.pdf}
+    \caption{Overview of the System Architecture}
+    \label{fig:overview}
+\end{figure}
+
+An overview of the YACA system architecture can be found in \Cref{fig:overview}. YACA uses the client-server architecture, where clients are participants of a (single) global group chat and servers ensure that the chat history is replicated in a Byzantine fault-tolerant manner. In the following, we provide an overview of available administrator configuration, along with basic server and client functionality:
+
+\subsection{Administrator Configuration}\label{sec:admin_config}
+Before spawning system-components, the administrator is able to configure multiple components that remain unchanged during execution. This comprises the following settings:
+\begin{itemize}
+    \item Class D Internet address: An address, preferably within the Local Network Control Block (224.0.0.0 to 224.0.0.225), used by the servers for multicast traffic.
+    \item 5 $\times$ UDP ports: Four predefined ports used by servers to consume new multicast messages (cf. \Cref{sec:overview}) and one predefined port for listening to broadcast messages.
+    \item Timeout settings: Specification for different timeouts that might occur (e.g. heartbeats, polling-rates, timeouts for crash detection)
+    \item Initial view: Specification of servers that are spawned at first startup. Each server is specified with an identifier, an IP address and listening-port, and a public key for digital signatures.\footnote{Note that the initial view is solely used by the servers as a base case, allowing new dynamically spawned servers the build a web of trust (cf. \Cref{sec:view_sync_comm}).}
+\end{itemize}
+
+\subsection{Server and Clients} \label{sec:overview}
+On startup, the server is either part of the initial view, or joins the group by using the join-protocol described in \Cref{sec:view_sync_comm}. Most importantly, we use view-synchronous group communication, entailing that the new server builds a group view that is consistent with other correct servers' group views. Therefore, using a combination of view-synchronous group communication and digital signatures, we can realize closed group communication. As described in \Cref{sec:admin_config}, we use one multicast address where servers consume multicast messages over four UDP ports, each serving a different purpose:
+\begin{enumerate}
+    \item[i)] \textsf{C-Read}: R-multicast (cf. \Cref{sec:primitives}), where clients can query heartbeats and public keys of other clients.
+    \item[ii)] \textsf{C-Write}: CO-R-multicast (cf. \Cref{sec:primitives}), where clients send new group chat messages to, or register to the service.
+    \item[iii)] \textsf{S-Coordination}: CO-R-multicast, where \textit{exclusively} servers can perform the election algorithm and the phase-king algorithm.
+    \item[iv)] \textsf{S-Announcements}: TO-R-multicast (cf. \Cref{sec:to_multicast}), where \textit{exclusively} servers announce elections and information about new servers is announced.
+\end{enumerate}
+
+\subsubsection{C-Read} 
+Clients send new group chat messages to \textsf{C-Write}. To reduce the load of the servers, clients are only allowed to send messages, but not heartbeats or negative acknowledgements (cf. \Cref{sec:primitives}). Therefore, clients can periodically query servers' heartbeats via \textsf{C-Read}. Note that this mechanism can also be used by the clients to detect if there were omission failures. In response, the client receives heartbeats from multiple servers, which can then be contracted individually, via unicast, to retrieve the new group chat messages. Since the retrieved group chat messages contain vector timestamps, the client is able to recreate the chat history while respecting the happened-before relation.
+
+The second important usage of \textsf{C-Read} is that a client can query public keys of other clients: Since clients sign every group chat message they sent, including the vector timestamp, malicious (i.e. Byzantine fault) servers cannot tamper with group chat messages, once the client knows about the corresponding public keys. To gain knowledge about these public signing keys, the client multicasts a query to the group of servers, collects their responses and performs a majority decision.
+
+\subsubsection{C-Write}
+On startup, clients create a random user ID and a digital signature key-pair. They then sent both via \textsf{C-Write} to the servers, which perform the phase-king algorithm (cf. \Cref{sec:consensus}) on the received data to ensure consensus.\footnote{This is required in case the client is malicious or there are multiple clients with the same user ID registering at the same time.} The servers respond afterward to notify the client whether the registration was successful. If necessary, the client retries the registration process.
+
+Additionally, clients send their new group chat messages to \textsf{C-Write}. To ensure that other clients are able to rebuild the chat history while respecting the happened-before relation, new group messages contain the client's vector timestamps. Furthermore, the message, including the vector timestamp, is signed by the client to ensure that malicious servers cannot tamper with it.
+
+\subsubsection{S-Coordination} 
+Since TO-R-multicast used by \textsf{S-Announcements} has a non-negligible overhead, we use \textsf{S-Coordination} for messages that do not have to be total-ordered. There are mainly two applications for \textsf{S-Coordination}: When delivering a message via \textsf{S-Announcements}, we perform the phase-king algorithm on the delivered message contents to ensure that every correct server processes the same message.\footnote{This is required, since the original sender might send different messages, with the same sequence number, to different servers.} The second application is that \textsf{S-Coordination} can be used to perform elections, after delivering election announcements via \textsf{S-Announcements}. 
+
+\subsubsection{S-Announcements}
+As previously stated, \textsf{S-Announcements} is used to deliver election announcements and to announce newly joined servers. This ensures that join messages, as part of view-synchronous group communication, are delivered in the same order (cf. \Cref{sec:view_sync_comm}), and that every server has the same group-view when starting an election. 
+
+Note that the phase-king algorithm also requires a consistent group-view, analogously to the election algorithm. Since the phase-king algorithm is also used for \textsf{C-Write}, while the max-phase-king algorithm is used to realize TO-R-multicast itself (cf. \Cref{sec:to_multicast}), we terminate all executions of the phase-king algorithm when \textsf{S-Announcements} delivers a join message.\footnote{To be more exact, we use hold-messages as described in \Cref{sec:view_sync_comm} to ensure that either every or no server terminates a phase-king execution.}
+
+\subsection{Manager (MGR)}
+We use leader election to determine a unique \textit{Manager (MGR)} of the servers. While the MGR behaves, for the most part, identical to other servers, he also listens to incoming broadcast messages. This is used by new servers to contact a server instance who is able to send messages to \textsf{S-Announcements}. This is required since servers only accept messages over \textsf{S-Announcement}, which were sent by other participants they already know.
+
+For the sake of full transparency, we note that this utilization of the MGR is neither the most practical nor the most efficient one, and is instead mostly used to fulfill the formalities of the project requirements. For example, one disadvantage of this approach is other servers have to constantly monitor the MGR, by listening to broadcast themselves, in order to ensure that the \textit{non-triviality} guarantee of view-synchronous group communication is satisfied, since the MGR himself might be malicious.
+
+\newpage
+\section{Implementation Details}\label{sec:implementation}
+
+\subsection{Primitives} \label{sec:primitives}
 
 \subsubsection{Notation} We use $V$ to denote the (finite) set of server processes. To coincide with the notation of the lecture and \cite{ds_book}, we sometimes use $g$ do denote the server group.
 
@@ -125,7 +192,6 @@ For safety, it is easy to see that if $p_i \in V_g$ sets $elected_i = p_k \neq \
 
 For liveness, we use the fact that the phase-king algorithm requires $f < n/4$. Therefore, the for-loop in line $(3)$ eventually selects a correct server $p_k$, i.e., after at most $f+1$ iterations. By assumption, the $p_k$ responds to the incoming ping-messages of other servers, resulting in $init\_value_i = 1$ for every $p_i \in V_g$. Since $|V_g| = n-f > n/2 + f$, the correct processes always use the majority value in round 2 of every phase in the phase-king algorithm. Therefore, the result of the phase-king algorithm is $1$ as well and $elected_i$ is set to $p_k \neq \bot$.\footnote{A similar argument provides an even stronger guarantee than safety, where the elected process appears as ''not-crashed'' to at least one correct process. }
 
-
 \subsection{Total-Ordered Reliable Multicast (TO-R-Multicast)} \label{sec:to_multicast}
 We build TO-R-multicast on top of CO-R-multicast using the ISIS algorithm described in \cite[p.~655-656]{ds_book}. We use CO-R-multicast instead of R-multicast for the following three reasons:
 \begin{enumerate}
@@ -163,11 +229,13 @@ In view-synchronous group communication, new processes can join and participants
         \item When a new server $p$ wants to join the group of servers, he sends a request to the MGR (via broadcast) containing $p$'s ID, IP address and listening-port, and a public key for digital signatures.
         \item When the MGR receives such a request he validates that $p$'s ID is unique, encapsulates the request in a signed \textit{join-message}, and forwards it via TO-R-multicast. Note that signing the join-message is crucial as other servers only accept messages of participants. Furthermore, note that other servers can validate the correct behavior of the MGR by listening to broadcast as well. 
         \item When a participant $q$ delivers the join-message of $p$, $q$ sends an acknowledgement to $p$ adds the encapsulated information to its group-view, but marks $p$ as still \textit{inactive}. Furthermore, $q$ sends a hold-message on each multicast instance (identical to $i)$). 
-        \item When $p$ receives the first acknowledgement, he is now able to send negative acknowledgements and is therefore able to consume the messages of every multicast instance. When reaching the corresponding hold-messages (containing $p$'s ID), $p$ sends a \textit{commence-message} to tell other participants to resume normal operation. 
+        \item When $p$ receives the first acknowledgement, he is now able to send negative acknowledgements and is therefore able to consume the messages of every multicast instance. When reaching the corresponding hold-messages (containing $p$'s ID), $p$ sends a \textit{commence-message} to tell other participants to resume normal operation.\footnote{Most importantly, this mechanism allows $p$ to build its own consistent group view: Using an inductive argument, $p$ starts with the initial view (i.e. the base case) and is able to verify the signatures of the initial processes. Any process $q$ that joined thereafter must have used the same protocol as $p$, which allows $p$ to validate that $q$ was indeed added to the group-view. This way, $p$ also learns of $q$'s public key, which enables $p$ to build a web of trust and validate new messages of $q$. Analogously, $p$ collects suspect messages and suspends processes if necessary. By simulating previous elections and phase-king executions, $p$ is then able to rebuild the consistent state and group-view in a Byzantine fault-tolerant manner. }
         \item When $q$ receives a commence-message from $p$ on each multicast instance, he marks $p$ as \textit{active} and continues normal operation. Note that the first message of $p$ is expected to be a commence-message. Otherwise, $q$ simply sends a suspect message for $p$. Similarly, $q$ is able to set a timeout interval.
     \end{itemize} 
 \end{enumerate}
 When considering view-Synchronous group communication as defined in \cite[p. ~772-773]{ds_book}, we need to argue that the guarantees \textit{order, integrity, non-triviality, agreement, and validity} are satisfied. Due to space restrictions, we include the proof of correctness in \Cref{appendix:view_sync_comm}.
+
+\section{Conclusion and Discussion} \label{sec:conclusion}
 
 %
 % ---- Bibliography ----
@@ -177,7 +245,7 @@ When considering view-Synchronous group communication as defined in \cite[p. ~77
 
 \newpage 
 \appendix
-\section{Appendix}
+\section{Appendix}\label{appendix}
 \subsection{Max-Phase-King Algorithm}\label{appendix:maxphaseking}
 \lstset{
     basicstyle=\ttfamily,

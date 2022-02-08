@@ -8,8 +8,9 @@
 \usepackage{amsmath, amssymb}
 \usepackage{listings}
 \usepackage{color}
+\usepackage{doi}
 \usepackage{cleveref}
-
+\usepackage{footmisc}
 \definecolor{darkgreen}{rgb}{0,0.6,0}
 % Used for displaying a sample figure. If possible, figure files should
 % be included in EPS format.
@@ -45,7 +46,7 @@ This report starts with an overview in \Cref{sec:req_analysis}, how our project 
 
 \section{Architecture Design} \label{sec:arch_design}
 
-\begin{figure}[b]
+\begin{figure}[t]
     \centering
     \includegraphics[scale=0.7]{graphics/DS_Architecture.pdf}
     \caption{Overview of the System Architecture}
@@ -91,9 +92,7 @@ As previously stated, \textsf{S-Announcements} is used to deliver election annou
 Note that the phase-king algorithm also requires a consistent group-view, analogously to the election algorithm. Since the phase-king algorithm is also used for \textsf{C-Write}, while the max-phase-king algorithm is used to realize TO-R-multicast itself (cf. \Cref{sec:to_multicast}), we terminate all executions of the phase-king algorithm when \textsf{S-Announcements} delivers a join message.\footnote{To be more exact, we use hold-messages as described in \Cref{sec:view_sync_comm} to ensure that either every or no server terminates a phase-king execution.}
 
 \subsection{Manager (MGR)}
-We use leader election to determine a unique \textit{Manager (MGR)} of the servers. While the MGR behaves, for the most part, identical to other servers, he also listens to incoming broadcast messages. This is used by new servers to contact a server instance who is able to send messages to \textsf{S-Announcements}. This is required since servers only accept messages over \textsf{S-Announcement}, which were sent by other participants they already know.
-
-For the sake of full transparency, we note that this utilization of the MGR is neither the most practical nor the most efficient one, and is instead mostly used to fulfill the formalities of the project requirements. For example, one disadvantage of this approach is other servers have to constantly monitor the MGR, by listening to broadcast themselves, in order to ensure that the \textit{non-triviality} guarantee of view-synchronous group communication is satisfied, since the MGR himself might be malicious.
+We use leader election to determine a unique \textit{Manager (MGR)} of the servers. While the MGR behaves, for the most part, identical to other servers, he also listens to incoming broadcast messages. This is used by new servers to contact a server instance who is able to send messages to \textsf{S-Announcements}. This is required since servers only accept messages over \textsf{S-Announcement}, which were sent by other participants they already know.\footnote{For the sake of full transparency, we note that this utilization of the MGR is neither the most practical nor the most efficient one, and is instead mostly used to fulfill the formalities of the project requirements. For example, one disadvantage of this approach is that other servers would have to constantly monitor the MGR, by listening to broadcast themselves, in order to ensure that the \textit{non-triviality} guarantee of view-synchronous group communication is satisfied, since the MGR himself might be malicious. At the time of writing this report, this monitoring feature was not yet implemented.\label{footnote:mgr}}
 
 \newpage
 \section{Implementation Details}\label{sec:implementation}
@@ -218,7 +217,7 @@ For the proof of correctness, consider two correct processes $p_i$ and $p_j$, wh
 \subsection{View-Synchronous Group Communication} \label{sec:view_sync_comm}
 In view-synchronous group communication, new processes can join and participants can be suspended. 
 \begin{enumerate}
-    \item[i)] \textit{Suspension:} We extend the suspicion protocol described in \Cref{sec:suspicion}. Furthermore, our servers listen to multiple multicast instances (i.e. one for TO-R-multicast and two for CO-R-multicast), which is also considered in the following: 
+    \item[i)] \textit{Suspension:}\footnote{For the sake of full transparency, we note that, at the time of writing, this feature is not implemented yet. Instead, we suspend a server directly after receiving $n-f$ suspect messages as described in \Cref{sec:suspicion}. For a single CO-R-multicast instance, this approach is sufficient since both phase-king algorithm and ISIS algorithm are highly synchronized. In contrast to this, there remains a small probability that, for multiple CO-R-instances, this causes race-conditions and leads to inconsistent behavior. \label{footnote:suspension}} We extend the suspicion protocol described in \Cref{sec:suspicion}. Furthermore, our servers listen to multiple multicast instances (i.e. one for TO-R-multicast and two for CO-R-multicast), which is also considered in the following: 
     \begin{itemize}
         \item If a server $p$ detects inconsistent or incorrect behavior, or receives more than $f$ suspect messages (cf. \Cref{sec:suspicion}), $p$ sends a suspect message via each multicast instance.
         \item If $p$ gathers at least $n-f$ suspect messages for servers $q_1, \ldots, q_k$, he sends \textit{hold-messages} $h_1, \ldots, h_k$, where $h_i$ contains information about $q_i$, and stops sending new messages, except for additional suspect and hold messages. He waits for the corresponding hold messages for $q_1, \ldots, q_k$ of all other servers. If a server $q$ does not send a hold message within a timeout interval, $p$ send a suspect message for $q$ as well. 
@@ -233,9 +232,14 @@ In view-synchronous group communication, new processes can join and participants
         \item When $q$ receives a commence-message from $p$ on each multicast instance, he marks $p$ as \textit{active} and continues normal operation. Note that the first message of $p$ is expected to be a commence-message. Otherwise, $q$ simply sends a suspect message for $p$. Similarly, $q$ is able to set a timeout interval.
     \end{itemize} 
 \end{enumerate}
-When considering view-Synchronous group communication as defined in \cite[p. ~772-773]{ds_book}, we need to argue that the guarantees \textit{order, integrity, non-triviality, agreement, and validity} are satisfied. Due to space restrictions, we include the proof of correctness in \Cref{appendix:view_sync_comm}.
+When considering view-synchronous group communication as defined in \cite[p. ~772-773]{ds_book}, we need to argue that the guarantees \textit{order, integrity, non-triviality, agreement, and validity} are satisfied. Due to space restrictions, we include the proof of correctness in \Cref{appendix:view_sync_comm}.
 
 \section{Conclusion and Discussion} \label{sec:conclusion}
+In this report, we present \textit{Yet Another Chat Application (YACA)}, which allows multiple clients to chat in one global chat-room. Chat messages are replicated using \textit{active replication}, making clients resilient against malicious servers. On server-side, we use view-synchronous group communication, reliable total-ordered multicast, and the (max-)phase-king algorithm as powerful building blocks to reach consensus and to maintain a consistent group-view. For each building block, we argue in \Cref{sec:implementation} how our implementation achieves high resilience against Byzantine faults. In particular, we design the max-phase-king algorithm (cf. \Cref{appendix:maxphaseking}) specifically for reaching consensus on the sequence numbers used by the ISIS algorithm, while also ensuring that the output value is larger than every input value of the correct processes. 
+
+For the sake of full transparency, we note that, at the time of writing, there are two parts respected in this report which are not implemented yet (cf. Footnotes \ref{footnote:mgr}, \ref{footnote:suspension})
+
+TODO Discussion
 
 %
 % ---- Bibliography ----
@@ -396,7 +400,7 @@ In the following, we show that our implementation described in \Cref{sec:view_sy
     \item[i)] \textit{Order:} Let $p$ and $q$ be correct processes that deliver the views $v(g)$ and $v'(g)$. If $p$ delivers view $v(g)$ before $v'(g)$, there exists $i, j \in \mathbb{N}_{\geq 1}$ with $v(g) = v_i(g)$ and $v'(g) = v_{i+j}$. Due to the total-ordering of join-messages, we can also assume that $v_i(g), \ldots, v_{i+j}(g)$ are of the second form, as described in \Cref{eq:view} (otherwise, \textit{Order} is trivially satisfied). Before $p$ delivers $v(g)$, $p$ collects hold-messages from all processes that are not enqueued for suspension. In particular, $p$ received corresponding hold messages from $q$, which entails that $q$ was also collecting suspect messages for the same processes as $p$. Using the guarantees of our suspicion protocol (cf. \Cref{sec:suspicion}), it is easy to see that $p$ and $q$ eventually suspend the same processes. Therefore, $q$ also delivers $v(g)$ before $v'(g)$.
     \item[ii)] \textit{Agreement:} In addition to the \textit{Order} guarantee, \textit{Agreement} also demands that every correct process delivers the same messages in every view. This is achieved by using hold-messages as described in \Cref{sec:view_sync_comm} in combination with CO-R-multicast. 
     \item[iii)] \textit{Integrity:} If a correct process $p$ delivers view $v(g)$, then $p$ is not suspended since it would have terminated otherwise. Therefore, $p \in v(g)$ holds true. Furthermore, if $p$ delivers a message $m$, then the guarantees of CO-R-multicast entail that $p$ will not deliver $m$ again. Finally, the usage of hold-messages ensures that $sender(m)$ is in the view in which $p$ delivers $m$.
-    \item[iv)] \textit{Non-triviality:} If a correct process $q$ joins the group, it contacts the MGR via broadcast to forward the join-message to all participants via TO-R-multicast. As other participants also listen to broadcast, they can detect if the MGR does not forward join requests and send suspect messages. Therefore, we can assume that the join-message of $q$ is eventually delivered by every participant via TO-R-multicast. By construction, $q$ then consumes the messages of every multicast instance and is afterwards considered as an active participant.
+    \item[iv)] \textit{Non-triviality:} If a correct process $q$ joins the group, it contacts the MGR via broadcast to forward the join-message to all participants via TO-R-multicast. As other participants also listen to broadcast, they can theoretically\footnote{For the sake of full transparency, we note that we did not implement this feature yet.} detect if the MGR does not forward join requests and send suspect messages. Therefore, we can assume that the join-message of $q$ is eventually delivered by every participant via TO-R-multicast. By construction, $q$ then consumes the messages of every multicast instance and is afterwards considered as an active participant.
     
     Analogously, correct processes eventually detect group partitions via timeouts and send suspect messages. Using the guarantees of our suspicion protocol (cf. \Cref{sec:suspicion}), the processes of other partitions are eventually suspended, as long as the own partition contains more than $2n/3$ processes. 
     \item[v)] \textit{Validity:} Because of the validity guarantee of CO-R-multicast, correct processes always deliver the messages that they send. If the system fails to deliver a message to any process $q$, other correct processes will notice a timeout when waiting for the hold-messages of $q$ before delivering a new view (if the timeout is not noticed before). Since this timeout is detected by $n-f$ correct processes, $q$ will be suspended and excluded from the next view. 
