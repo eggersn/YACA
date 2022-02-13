@@ -6,7 +6,7 @@ import random
 from nacl.signing import SigningKey
 
 def setup():
-    f = open("config/server.json")
+    f = open("config/config.json")
     config = json.load(f)
 
     data = {} 

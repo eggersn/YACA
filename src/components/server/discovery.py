@@ -40,6 +40,7 @@ class ServerDiscovery:
 
                 try:
                     data, addr = self._broadcast_socket.recvfrom(1024)
+                    print(data)
                 except:
                     pass
                 else:

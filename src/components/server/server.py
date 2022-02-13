@@ -2,7 +2,6 @@ import time
 
 from src.protocol.consensus.suspect import GroupViewSuspect
 from src.core.unicast.sender import UnicastSender
-from src.protocol.election.announcement import ElectionAnnouncement
 from src.core.unicast.udp_listener import UDPUnicastListener
 from src.core.consensus.phase_king import PhaseKing
 from src.core.signatures.signatures import Signatures
@@ -15,9 +14,6 @@ from src.core.group_view.group_view import GroupView
 from src.core.utils.configuration import Configuration
 from src.core.utils.channel import Channel
 from src.core.broadcast.broadcast_listener import BroadcastListener
-from src.protocol.base import Message
-from src.protocol.group_view.join import JoinRequest, JoinMsg
-from src.protocol.multicast.to_message import TotalOrderMessage
 from src.components.server.processing.client_requests import ClientRequestsProcessing
 from src.components.server.processing.announcements import AnnouncementProcessing
 from src.components.server.processing.joining import JoinProcessing
@@ -78,10 +74,6 @@ class Server:
         )
         self._client_read_multicast.start()
 
-        self._client_processing = ClientRequestsProcessing(
-            self._client_channel, self._client_write_multicast, self._group_view, self._configuration
-        )
-
         # multicast handler for consensus (reliable causal ordered multicast)
         self._consensus_multicast = CausalOrderedReliableMulticast(
             self._configuration.get_multicast_addr(),
@@ -112,10 +104,19 @@ class Server:
         )
         self._announcement_multicast.start(trash=not initial)
 
+        self._client_processing = ClientRequestsProcessing(
+            self._client_channel,
+            self._client_write_multicast,
+            self._announcement_multicast,
+            self._group_view,
+            self._configuration,
+        )
+
         self._announcement_processing = AnnouncementProcessing(
             self._announcement_channel,
             self._consensus_channel,
             self._announcement_multicast,
+            self._client_processing,
             self._phase_king,
             self._group_view,
             self._configuration,
@@ -142,7 +143,8 @@ class Server:
                 self._consensus_channel,
                 self._group_view,
                 self._configuration,
-                self._announcement_multicast._halting_semaphore,
+                self._announcement_multicast,
+                self._client_processing,
             )
             join_processing.start()
             self._group_view.wait_till_I_am_added()

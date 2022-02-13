@@ -70,7 +70,7 @@ class UnicastSender:
         msg.set_nonce(nonce)
         msg.encode()
 
-        self.upd_sender.sendto(msg.json_data.encode(), addr)
+        self.upd_sender.sendto(str(msg.json_data).encode(), addr)
         self.upd_sender.settimeout(self._configuration.get_heartbeat_interval())
 
         k = 5
@@ -78,7 +78,7 @@ class UnicastSender:
             try:
                 data, _ = self.upd_sender.recvfrom(1024)
             except socket.timeout:
-                self.upd_sender.sendto(msg.json_data.encode(), addr)
+                self.upd_sender.sendto(str(msg.json_data).encode(), addr)
                 k -= 1
             else:
                 msg = Message.initFromJSON(data)

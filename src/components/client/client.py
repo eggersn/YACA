@@ -174,7 +174,7 @@ class Client:
         if nacks is not None:
             init_nacks = {}
             for identifier in nacks:
-                if nacks[identifier][0] == 0:
+                if len(nacks[identifier]) > 0 and nacks[identifier][0] == 0:
                     init_nacks[identifier] = [0]
                     nacks[identifier].pop(0)
 

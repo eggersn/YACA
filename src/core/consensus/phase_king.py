@@ -35,17 +35,19 @@ class PhaseKing:
         f = math.ceil(N / 4) - 1
         kings = []
         phase = 0
+        last_king = ""
 
         while f + 1 - len(kings) > 0:
             self.__debug(
                 "PhaseKing (Phase {}): King {}".format(
-                    phase, self._group_view.get_next_active_after_ith_server(phase)
+                    phase, self._group_view.get_next_active_after(last_king)
                 )
             )
             majority_value, majority_count = self._round1(value, phase)
-            value, king = self._round2(majority_value, majority_count, phase)
+            value, king = self._round2(majority_value, majority_count, phase, last_king)
             self.__debug('PhaseKing (Phase {}): Result "{}"'.format(phase, value))
 
+            last_king = king
             kings.append(king)
             kings = [king for king in kings if not self._group_view.check_if_server_is_inactive(king)]
             N = self._group_view.get_number_of_unsuspended_servers()
@@ -63,15 +65,19 @@ class PhaseKing:
     def _round1(self, value: str, phase: int):
         # on timeout, send suspect message for all servers that did not respond
         def timeout_handler(sender_ids):
+            self._channel.produce(None, topic=self._topic)
             for server_id in self._group_view.servers:
                 if server_id not in sender_ids and not self._group_view.check_if_server_is_inactive(
                     server_id
                 ):
+                    print(self._group_view.servers)
                     self.__debug("PhaseKing: Suspecting {} in Round 1".format(server_id))
                     suspect_msg = GroupViewSuspect.initFromData(server_id, self._topic)
                     suspect_msg.encode()
 
                     self._multicast.send(suspect_msg)
+
+
 
         self.__debug(
             'PhaseKing ({}Phase {} - Round 1): Initial value "{}"'.format(
@@ -102,23 +108,26 @@ class PhaseKing:
         while i < N:
             data = self._channel.consume(self._topic)
 
-            message = Message.initFromJSON(data)
-            message.decode()
+            if data is not None:
+                message = Message.initFromJSON(data)
+                message.decode()
 
-            sender_id, _ = message.get_signature()
-            if not self._group_view.check_if_server_is_inactive(sender_id):
-                if message.header == "Phase King: Message":
-                    i = self._handle_round1_phaseking_msg(data, sender_ids, values, phase, i)
+                sender_id, _ = message.get_signature()
+                if not self._group_view.check_if_server_is_inactive(sender_id):
+                    if message.header == "Phase King: Message":
+                        i = self._handle_round1_phaseking_msg(data, sender_ids, values, phase, i)
 
-                elif message.header == "View: Suspect":
-                    N = self._handle_round1_suspect_msg(
-                        data,
-                        suspected_servers,
-                        sender_ids,
-                        values,
-                        phase,
-                        N,
-                    )
+                    elif message.header == "View: Suspect":
+                        self._handle_round1_suspect_msg(
+                            data,
+                            suspected_servers,
+                            sender_ids,
+                            values,
+                            phase,
+                            N,
+                        )
+
+            N = self._group_view.get_number_of_unsuspended_servers()
 
         # cancel timeout timer
         if self._multicast is not None:
@@ -208,10 +217,9 @@ class PhaseKing:
     If a phase king is suspended, the process with the next higher id is selected - until there exists a correct phase king. 
     """
 
-    def _round2(self, majority_value, majority_count, phase):
-        def timeout_handler(i):
-            phase_king = self._group_view.get_next_active_after_ith_server(i)
-            self.__debug("PhaseKing: Suspecting {} in Round 1".format(phase_king))
+    def _round2(self, majority_value, majority_count, phase, last_king):
+        def timeout_handler(phase_king):
+            self.__debug("PhaseKing: Suspecting {} in Round 2".format(phase_king))
             suspect_msg = GroupViewSuspect.initFromData(phase_king, self._topic)
             suspect_msg.encode()
 
@@ -221,7 +229,7 @@ class PhaseKing:
         N = self._group_view.get_number_of_unsuspended_servers()
 
         while tiebreaker is None:
-            phase_king = self._group_view.get_next_active_after_ith_server(phase)
+            phase_king = self._group_view.get_next_active_after(last_king)
             suspecting_servers = []
 
             self.__debug(
@@ -244,7 +252,7 @@ class PhaseKing:
                 timer = threading.Timer(
                     self._configuration.get_timeout(),
                     timeout_handler,
-                    args=(phase,),
+                    args=(phase_king,),
                 )
                 timer.start()
 

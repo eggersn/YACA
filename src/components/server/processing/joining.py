@@ -14,7 +14,8 @@ from src.protocol.base import Message
 from src.core.unicast.sender import UnicastSender
 from src.core.consensus.phase_king import PhaseKing
 from src.core.election.election import Election
-
+from src.protocol.client.write.initial import *
+from src.components.server.processing.client_requests import ClientRequestsProcessing
 
 class JoinProcessing:
     def __init__(
@@ -23,7 +24,8 @@ class JoinProcessing:
         consensus_channel: Channel,
         group_view: GroupView,
         configuration: Configuration,
-        semaphore: threading.Semaphore
+        announcement_multicast : TotalOrderedReliableMulticast,
+        client_processing : ClientRequestsProcessing,
     ):
         self._channel = announcement_channel
         self._consensus_channel = consensus_channel
@@ -34,7 +36,9 @@ class JoinProcessing:
             self._consensus_channel, None, self._group_view, self._configuration, verbose=True
         )
         self._election = Election(self._phase_king, group_view, configuration, True)
-        self._semaphore = semaphore
+        self._to_multicast = announcement_multicast
+        self._client_processing = client_processing
+        
 
     def start(self):
         self.consumer()
@@ -43,7 +47,6 @@ class JoinProcessing:
         finished = False 
         while not finished:
             data = self._channel.consume()
-            print(data)
             finished = self._process_request(data)
 
         self._group_view.flag_ready_to_join()
@@ -56,6 +59,8 @@ class JoinProcessing:
             return self._process_join(data)
         elif "Election: Announcement" == msg.header:
             self._process_election()
+        elif "Client: Join Message" == msg.header:
+            self._process_client_init(data)
 
         return False
 
@@ -75,6 +80,7 @@ class JoinProcessing:
 
         data = shortened_data.split("#")
         if len(data) != 4:
+            self._to_multicast._join_semaphores[join_request.identifier].release()
             return False
 
         pk = VerifyKey(base64.b64decode(data[1]))
@@ -85,12 +91,14 @@ class JoinProcessing:
         # note that, due to the phaseking algorithm before, all honest servers suspend the server if at least one honest server does so
         if not join_request.verify_signature(self._signature, self._group_view.pks):
             self._group_view.suspend_server(join_request.identifier)
+            self._to_multicast._join_semaphores[join_request.identifier].release()
             return False 
 
+        self._to_multicast._join_semaphores[join_request.identifier].release()
         if join_request.identifier == self._group_view.identifier:
             return True 
         else:
-            self._semaphore.acquire()
+            self._to_multicast.halt_multicast(join_request.identifier)
             return False
 
     def _process_election(self):
@@ -98,3 +106,16 @@ class JoinProcessing:
         
         if consented_value == "election":
             self._election.election()
+
+    def _process_client_init(self, data):
+        init_msg = TOInitMsg.initFromJSON(data)
+        init_msg.decode()
+
+        msg = InitMessage.initFromJSON(init_msg.request)
+        msg.decode()
+
+        pk_string = base64.b64encode(msg.pk.encode()).decode("ascii")
+        consistent_pk = self._phase_king.consensus("client-init#"+pk_string)        
+
+        if "#" in consistent_pk:
+            self._client_processing._posthook_client_init(init_msg.request, consistent_pk.split("#")[1], quite=True)

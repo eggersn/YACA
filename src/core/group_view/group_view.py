@@ -54,6 +54,22 @@ class GroupView:
             server = self.servers[i + k]
         return server
 
+    def get_next_active_after(self, identifier):
+        if identifier == "":
+            search = True
+        else:
+            search = False
+
+        k = 0
+        server = self.servers[k]
+        while not search or self.check_if_server_is_inactive(server):
+            if server == identifier:
+                search = True
+            k += 1
+            server = self.servers[k]
+
+        return server
+
     def suspend_server(self, identifier):
         self.__debug("GroupView: Suspend", identifier)
         if identifier in self.servers and identifier not in self.suspended_servers:
@@ -75,6 +91,8 @@ class GroupView:
         self.manager = manager
         if self.identifier not in self.joining_servers:
             self._manager_election_semaphore.release()
+            if manager in self.suspended_servers:
+                self._manager_suspension_semaphore.release()
 
     def check_if_server_is_inactive(self, identifier):
         return identifier in self.suspended_servers or identifier in self.joining_servers

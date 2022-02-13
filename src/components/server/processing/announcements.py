@@ -2,6 +2,7 @@ import threading
 import base64
 from nacl.signing import VerifyKey
 
+from src.components.server.processing.client_requests import ClientRequestsProcessing
 from src.core.election.election import Election
 from src.protocol.consensus.suspect import GroupViewSuspect
 from src.core.signatures.signatures import Signatures
@@ -16,6 +17,7 @@ from src.protocol.base import Message
 from src.core.unicast.sender import UnicastSender
 from src.core.consensus.phase_king import PhaseKing
 from src.protocol.election.announcement import ElectionAnnouncement
+from src.protocol.client.write.initial import *
 
 
 class AnnouncementProcessing:
@@ -24,6 +26,7 @@ class AnnouncementProcessing:
         announcement_channel: Channel,
         consensus_channel: Channel,
         announcement_multicast: TotalOrderedReliableMulticast,
+        client_processing: ClientRequestsProcessing,
         phase_king: PhaseKing,
         group_view: GroupView,
         configuration: Configuration,
@@ -31,6 +34,7 @@ class AnnouncementProcessing:
         self._channel = announcement_channel
         self._consensus_channel = consensus_channel
         self._to_multicast = announcement_multicast
+        self._client_processing = client_processing
         self._phase_king = phase_king
         self._group_view = group_view
         self._configuration = configuration
@@ -57,6 +61,8 @@ class AnnouncementProcessing:
             self._process_join(data)
         elif "Election: Announcement" == msg.header:
             self._process_election()
+        elif "Client: Join Message" == msg.header:
+            self._process_client_init(data)
         
 
     def _process_join(self, data):
@@ -105,3 +111,16 @@ class AnnouncementProcessing:
         
         if consented_value == "election":
             self._election.election()
+
+    def _process_client_init(self, data):
+        init_msg = TOInitMsg.initFromJSON(data)
+        init_msg.decode()
+
+        msg = InitMessage.initFromJSON(init_msg.request)
+        msg.decode()
+
+        pk_string = base64.b64encode(msg.pk.encode()).decode("ascii")
+        consistent_pk = self._phase_king.consensus("client-init#"+pk_string)        
+
+        if "#" in consistent_pk:
+            self._client_processing._posthook_client_init(init_msg.request, consistent_pk.split("#")[1])

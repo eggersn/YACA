@@ -1,4 +1,6 @@
 import threading
+import random 
+import string
 
 from src.core.broadcast.broadcast_listener import BroadcastListener
 from src.protocol.group_view.join import *
@@ -58,7 +60,8 @@ class DiscoveryProcessing:
             response_msg = self._process_request(data)
 
             if response_msg is not None:
-                responder.send_udp_without_ack(response_msg, addr)
+                nonce = "".join(random.choice(string.ascii_uppercase + string.digits) for _ in range(10))
+                responder.send_udp(response_msg, addr, nonce)
 
     def _process_request(self, data):
         msg = Message.initFromJSON(data)

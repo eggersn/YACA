@@ -1,5 +1,6 @@
 import threading
 import time
+import math
 from src.core.consensus.max_phase_king import MaxPhaseKing
 from src.core.utils.configuration import Configuration
 from src.core.utils.channel import Channel
@@ -11,6 +12,7 @@ from src.core.group_view.group_view import GroupView
 from src.protocol.consensus.suspect import GroupViewSuspect
 from src.protocol.multicast.halt import HaltMessage
 from src.protocol.multicast.commence import CommenceMessage
+from src.protocol.group_view.join import JoinMsg, JoinRequest
 
 
 class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
@@ -39,6 +41,7 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
         self._halting_servers: dict[str, str] = {}
         self._halting_semaphore = threading.Semaphore(0)
         self._join_response_buffer: list[str] = []
+        self._join_semaphores = {}
 
         self._max_phase_king = MaxPhaseKing(
             self._response_channel, self._to_holdback_queue, self._group_view, self._configuration, verbose
@@ -52,10 +55,10 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
         while True:
             time.sleep(5 * self._configuration.get_heartbeat_interval())
             with self._to_holdback_dict_lock:
-                ts = time.time_ns() / 10 ** 9
+                ts = time.time_ns() / 10**9
                 for key in self._to_holdback_dict:
                     entry = self._to_holdback_dict[key]
-                    if ts - entry[2] > timeout:
+                    if entry is not None and ts - entry[2] > timeout:
                         for server_id in self._group_view.servers:
                             if (
                                 server_id not in entry[1]
@@ -73,6 +76,18 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
 
     def _to_deliver(self, data):
         self.__debug("TO-Multicast: Deliver", data)
+
+        if self._group_view.identifier in self._group_view.joining_servers:
+            msg = Message.initFromJSON(data)
+            msg.decode()
+
+            if msg.header == "View: Join Message":
+                msg = JoinMsg.initFromJSON(data)
+                msg.decode()
+                join_request = JoinRequest.initFromJSON(msg.request)
+                join_request.decode()
+                self._join_semaphores[join_request.identifier] = threading.Semaphore(0)
+        
         self._channel.produce(data)
 
     def _to_consume(self, data, identifier, seqno):
@@ -142,7 +157,7 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
                 entry = self._to_holdback_queue.pop(0)
                 self._to_deliver(self._to_holdback_dict[entry[1]][0])
                 with self._to_holdback_dict_lock:
-                    del self._to_holdback_dict[entry[1]]
+                    self._to_holdback_dict[entry[1]] = None
             elif entry[2] == N:
                 self._max_phase_king.start_new_execution(entry[0], entry[1])
                 break
@@ -153,9 +168,12 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
         suspect_msg = GroupViewSuspect.initFromJSON(data)
         suspect_msg.decode()
 
-        sender_id, _ = suspect_msg.get_signature()
+        if self._group_view.identifier in self._group_view.joining_servers and suspect_msg.identifier in self._join_semaphores:
+            self._join_semaphores[suspect_msg.identifier].acquire()
 
         if self._group_view.check_if_participant(suspect_msg.identifier):
+            sender_id, _ = suspect_msg.get_signature()
+
             if (suspect_msg.identifier, suspect_msg.topic) not in self._suspended_dict:
                 self._suspended_dict[(suspect_msg.identifier, suspect_msg.topic)] = {}
 
@@ -166,23 +184,27 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
                     )
                 )
 
-                ts = time.time_ns() / 10 ** 9
+                ts = time.time_ns() / 10**9
                 self._suspended_dict[(suspect_msg.identifier, suspect_msg.topic)][sender_id] = ts
 
             N = self._group_view.get_number_of_unsuspended_servers()
-            f = int(N / 3)
+            f = math.ceil(N / 4) - 1
 
             # remove suspect messages of inactive servers
             k = 0
-            ts = time.time_ns() / 10 ** 9
+            ts = time.time_ns() / 10**9
             servers = list(self._suspended_dict[(suspect_msg.identifier, suspect_msg.topic)].keys()).copy()
             while k < len(servers):
                 server = servers[k]
-                server_ts = self._suspended_dict[(suspect_msg.identifier, suspect_msg.topic)][server]
-                if self._group_view.check_if_server_is_inactive(server) or ts - server_ts > self._configuration.get_timeout():
-                    del self._suspended_dict[(suspect_msg.identifier, suspect_msg.topic)][server]
-                else:
-                    k += 1
+                if server in self._suspended_dict[(suspect_msg.identifier, suspect_msg.topic)]:
+                    server_ts = self._suspended_dict[(suspect_msg.identifier, suspect_msg.topic)][server]
+                    if (
+                        self._group_view.check_if_server_is_inactive(server)
+                        or ts - server_ts > self._configuration.get_timeout()
+                    ):
+                        del self._suspended_dict[(suspect_msg.identifier, suspect_msg.topic)][server]
+                    else:
+                        k += 1
 
             if (
                 len(self._suspended_dict[(suspect_msg.identifier, suspect_msg.topic)]) > f
@@ -190,9 +212,7 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
                 not in self._suspended_dict[(suspect_msg.identifier, suspect_msg.topic)]
             ):
                 # peer pressure...
-                response_suspect_msg = GroupViewSuspect.initFromData(
-                    suspect_msg.identifier, suspect_msg.topic
-                )
+                response_suspect_msg = GroupViewSuspect.initFromData(suspect_msg.identifier, suspect_msg.topic)
                 response_suspect_msg.encode()
                 self._response_channel.produce((response_suspect_msg.json_data, True))
                 print("Peer Pressure", response_suspect_msg.json_data, self._suspended_dict)
@@ -202,14 +222,14 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
                     self.__debug('TotalOrdering: Suspending "{}"'.format(suspect_msg.identifier))
                     self._group_view.suspend_server(suspect_msg.identifier)
 
-                if "TO-Proposal" in suspect_msg.topic:
-                    self._check_to_holdback_queue()
-                    self._check_hold_messages()
+                self._check_to_holdback_queue()
+                self._check_hold_messages()
 
-                if "PK-1:" in suspect_msg.topic:  # timeout of some server in round1 of maxphaseking
-                    self._max_phase_king.handle_round1_suspension(suspect_msg.topic)
-                if "PK-2:" in suspect_msg.topic:  # timeout of phaseking
-                    self._max_phase_king.handle_round2_suspension(suspect_msg.topic)
+                self._max_phase_king.handle_round1_suspension(suspect_msg.identifier)
+                self._max_phase_king.handle_round2_suspension(suspect_msg.identifier)
+
+        if self._group_view.identifier in self._group_view.joining_servers and suspect_msg.identifier in self._join_semaphores:
+            self._join_semaphores[suspect_msg.identifier].release()
 
     def _handle_halt_message(self, data):
         halt_msg = HaltMessage.initFromJSON(data)
@@ -227,34 +247,52 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
 
     def _check_hold_messages(self):
         if self._group_view.identifier in self._group_view.joining_servers:
-            N = self._group_view.get_number_of_unsuspended_servers()
-            if len(self._halting_servers.keys()) == N:
-                for sender_id in self._halting_servers:
-                    if self._halting_servers[sender_id] != self._group_view.identifier:
-                        return
+            my_commence = True
+            for sender_id in self._halting_servers:
+                if self._halting_servers[sender_id] != self._group_view.identifier:
+                    my_commence = False
 
-                # send commence message
-                commence_msg = CommenceMessage.initFromData(self._group_view.identifier)
-                commence_msg.encode()
+            if my_commence:
+                N = self._group_view.get_number_of_unsuspended_servers()
+                if len(self._halting_servers.keys()) == N:
 
+                    # send commence message
+                    commence_msg = CommenceMessage.initFromData(self._group_view.identifier)
+                    commence_msg.encode()
+
+                    self._max_phase_king.reset()
+                    self._group_view.wait_till_ready_to_join()
+                    self._group_view.mark_server_as_joined(self._group_view.identifier)
+                    self._group_view.flag_I_am_added()
+                    with self._to_holdback_dict_lock:
+                        ts = time.time_ns() / 10**9
+                        for key in self._to_holdback_dict:
+                            if self._to_holdback_dict[key] is not None:
+                                self._to_holdback_dict[key][2] = ts
+                    self._halting_servers = {}
+                    self._response_channel.set_trash_flag(False)
+                    self._response_channel.produce((commence_msg.json_data, True))
+                    for proposal_json in self._join_response_buffer:
+                        proposal_msg = TotalOrderProposal.initFromJSON(proposal_json)
+                        proposal_msg.decode()
+
+                        if proposal_msg.msg_identifier in self._to_holdback_dict:
+                            self._response_channel.produce((proposal_json, False))
+                    self._join_response_buffer = []
+            elif (
+                self._group_view.identifier in self._halting_servers
+                and self._group_view.check_if_server_is_suspended(
+                    self._halting_servers[self._group_view.identifier]
+                )
+            ):
+                self.__debug("TO-Multicast: JOIN timeout, resuming normal operation")
                 self._max_phase_king.reset()
-                self._group_view.wait_till_ready_to_join()
-                self._group_view.mark_server_as_joined(self._group_view.identifier)
-                self._group_view.flag_I_am_added()
-                with self._to_holdback_dict_lock:
-                    ts = time.time_ns() / 10 ** 9
-                    for key in self._to_holdback_dict:
-                        self._to_holdback_dict[key][2] = ts
+                self._group_view.mark_server_as_joined(
+                    self._halting_servers[self._group_view.identifier]
+                )  # removes server from joining list
                 self._halting_servers = {}
-                self._response_channel.set_trash_flag(False)
-                self._response_channel.produce((commence_msg.json_data, True))
-                for proposal_json in self._join_response_buffer:
-                    proposal_msg = TotalOrderProposal.initFromJSON(proposal_json)
-                    proposal_msg.decode()
-
-                    if proposal_msg.msg_identifier in self._to_holdback_dict:
-                        self._response_channel.produce((proposal_json, False))
-                self._join_response_buffer = []
+                self._halting_semaphore.release()
+                self._check_to_holdback_queue()
 
         elif (
             self._group_view.identifier in self._halting_servers
@@ -269,9 +307,10 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
                 self._halting_servers[self._group_view.identifier]
             )  # removes server from joining list
             with self._to_holdback_dict_lock:
-                ts = time.time_ns() / 10 ** 9
+                ts = time.time_ns() / 10**9
                 for key in self._to_holdback_dict:
-                    self._to_holdback_dict[key][2] = ts
+                    if self._to_holdback_dict[key] is not None:
+                        self._to_holdback_dict[key][2] = ts
             self._halting_servers = {}
             self.continue_sending()
             self._halting_semaphore.release()
@@ -290,23 +329,15 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
             self.__debug("TO-Multicast: Received commence message from", sender_id)
             self._max_phase_king.reset()
             self._group_view.mark_server_as_joined(sender_id)
-            self.timer.cancel()
-            self.timer1.cancel()
-            with self._to_holdback_dict_lock:
-                ts = time.time_ns() / 10 ** 9
-                for key in self._to_holdback_dict:
-                    self._to_holdback_dict[key][2] = ts
-            self._halting_servers = {}
-            self.continue_sending()
-            self._halting_semaphore.release()
-
-        elif (
-            sender_id == commence_msg.wait_until
-            and self._group_view.identifier in self._group_view.joining_servers
-        ):
-            self.__debug("TO-Multicast: Commence message from", sender_id)
-            self._max_phase_king.reset()
-            self._group_view.mark_server_as_joined(sender_id)
+            if self._group_view.identifier not in self._group_view.joining_servers:
+                self.timer.cancel()
+                self.timer1.cancel()
+                with self._to_holdback_dict_lock:
+                    ts = time.time_ns() / 10**9
+                    for key in self._to_holdback_dict:
+                        if self._to_holdback_dict[key] is not None:
+                            self._to_holdback_dict[key][2] = ts
+                self.continue_sending()
             self._halting_servers = {}
             self._halting_semaphore.release()
 
@@ -323,7 +354,7 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
         elif message.msg_identifier not in self._to_holdback_dict:
             self._P_g = max(self._A_g, self._P_g) + 1
             with self._to_holdback_dict_lock:
-                timestamp = time.time_ns() / 10 ** 9
+                timestamp = time.time_ns() / 10**9
                 self._to_holdback_dict[message.msg_identifier] = [data, [], timestamp]
             self._to_holdback_queue.append([0, message.msg_identifier, 0, False])
             self._to_holdback_queue.sort(key=lambda entry: (entry[0], entry[1]))
@@ -356,25 +387,29 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
 
     def halt_multicast(self, wait_until):
         self.__debug("TO-Multicast: Halting while waiting for", wait_until)
-        config = not self._suspend_multicast
-        self.halt_sending()
-        halt_msg = HaltMessage.initFromData(wait_until)
-        halt_msg.encode()
+        if self._group_view.identifier in self._group_view.joining_servers:
+            self._halting_servers[self._group_view.identifier] = wait_until
+            self._halting_semaphore.acquire()
+        else:
+            config = not self._suspend_multicast
+            self.halt_sending()
+            halt_msg = HaltMessage.initFromData(wait_until)
+            halt_msg.encode()
 
-        self.send(halt_msg, config)
+            self.send(halt_msg, config)
 
-        self.timer = threading.Timer(
-            self._configuration.get_timeout(), self.__existing_server_timeout_handler, args=(wait_until,)
-        )
-        self.timer.start()
-        self.timer1 = threading.Timer(
-            self._configuration.get_discovery_total_timeout(),
-            self.__new_server_timeout_handler,
-            args=(wait_until,),
-        )
-        self.timer1.start()
+            self.timer = threading.Timer(
+                self._configuration.get_timeout(), self.__existing_server_timeout_handler, args=(wait_until,)
+            )
+            self.timer.start()
+            self.timer1 = threading.Timer(
+                self._configuration.get_discovery_total_timeout(),
+                self.__new_server_timeout_handler,
+                args=(wait_until,),
+            )
+            self.timer1.start()
 
-        self._halting_semaphore.acquire()
+            self._halting_semaphore.acquire()
 
     def __debug(self, *msgs):
         if self.__verbose:

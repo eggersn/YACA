@@ -1,4 +1,5 @@
-from http import server
+import threading
+import time
 import enquiries
 import os
 import sys
@@ -7,7 +8,11 @@ import math
 
 import multiprocessing
 from src.components.server.server import Server
+from src.components.client.client import Client
 from src.core.utils.configuration import Configuration
+from src.protocol.base import Message
+from src.protocol.client.write.text_message import TextMessage
+from src.protocol.client.write.initial import InitMessage
 
 processes = {}
 
@@ -84,7 +89,12 @@ def kill_processes_menu():
 
 
 def kill_processes_component_menu(component):
-    print_menu_banner("Kill Processes (Selection: " + component + ") - Suggestion: Upper limit for Byzantine faults: " + str(math.ceil(len(processes[component])/4)-1))
+    print_menu_banner(
+        "Kill Processes (Selection: "
+        + component
+        + ") - Suggestion: Upper limit for Byzantine faults: "
+        + str(math.ceil(len(processes[component]) / 4) - 1)
+    )
 
     options = []
     counter = 1
@@ -134,6 +144,11 @@ def spawn_processes_menu():
                 p = multiprocessing.Process(target=launch_server)
                 p.start()
                 processes["server"].append(p)
+        elif choice == options[1]:
+            for _ in range(instances):
+                p = multiprocessing.Process(target=launch_client)
+                p.start()
+                processes["client"].append(p)
 
 
 def launch_server(initial=False, i=0):
@@ -143,13 +158,83 @@ def launch_server(initial=False, i=0):
     server.start()
 
 
+def inc_string(string):
+    if string == "z" * len(string):
+        return "a" * (len(string) + 1)
+
+    new_string = ""
+    for i in range(len(string) - 1, -1, -1):
+        if string[i] == "z":
+            new_string = "a" + new_string
+        else:
+            new_string = string[:i] + chr(ord(string[i]) + 1) + new_string
+            return new_string
+
+def max_string(val1 : str, val2 : str):
+    if len(val1) != len(val2):
+        return val1 if len(val1) > len(val2) else val2 
+
+    for i in range(len(val1) - 1, -1, -1):
+        if val1[i] != val2[i]:
+            return val1 if val1[i] > val2[i] else val2
+    
+    return val1 # val1 = val2
+        
+
+
+def launch_client():
+    sys.stdout = open("logs/client-" + str(os.getpid()) + ".out", "a", buffering=1)
+    sys.stderr = open("logs/client-" + str(os.getpid()) + ".out", "a", buffering=1)
+    client = Client()
+    client.start()
+    channel = client._delivery_channel
+
+    old_ts = 0
+    last_seen_text = ""
+    text = "a"
+
+    def timeout_handler():
+        channel.produce(None)
+
+    while True:
+        ts = time.time_ns() / 10**9
+        if ts - old_ts > 5:
+            old_ts = ts
+            client.send("(Reply to {}) {}".format(last_seen_text, text) if last_seen_text != "" else text)
+            text = inc_string(text)
+
+        timer = threading.Timer(5, timeout_handler)
+        timer.start()
+        data = channel.consume()
+        timer.cancel()
+        if data is not None:
+            msg = Message.initFromJSON(data)
+            msg.decode()
+
+            if msg.header == "Write: Initial":
+                msg = InitMessage.initFromJSON(data)
+                msg.decode()
+                print("{} joined the chat".format(msg.identifier))
+            if msg.header == "Write: TextMessage":
+                msg = TextMessage.initFromJSON(data)
+                msg.decode()
+
+                sender_id = msg.get_signature()[0]
+                print("{}: {}".format(sender_id, msg.text))
+                if sender_id != client._identifier:
+                    last_seen_text = '{}: "{}"'.format(sender_id, msg.text.split(" ")[-1] if " " in msg.text else msg.text)
+                    text = max_string(text, msg.text.split(" ")[-1] if " " in msg.text else msg.text)
+
+
 def main():
-    for f in os.listdir("logs/"):
-        os.remove(os.path.join("logs/", f))
+    if "-c" in sys.argv:
+        for f in os.listdir("logs/"):
+            os.remove(os.path.join("logs/", f))
 
     processes["server"] = []
+    processes["client"] = []
 
-    if len(sys.argv) > 1 and sys.argv[1] == '-i':
+    if len(sys.argv) > 1 and "-i" in sys.argv[1]:
         config = Configuration()
         for i in range(config.data["initial"]["instances"]):
             p = multiprocessing.Process(

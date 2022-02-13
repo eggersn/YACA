@@ -33,6 +33,28 @@ class InitMessage(Message):
 
         return message
 
+class TOInitMsg(Message):
+    def __init__(self):
+        super().__init__()
+
+        self.request: str
+
+    def encode(self):
+        self.content = {"request": self.request}
+        Message.encode(self)
+
+    def decode(self):
+        Message.decode(self)
+        self.request = self.content["request"]
+
+    @classmethod
+    def initFromData(cls, request: str):
+        message = cls()
+        message.header = "Client: Join Message"
+        message.request = request
+
+        return message
+
 class InitResponse(Message):
     def __init__(self):
         super().__init__()
