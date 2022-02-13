@@ -132,6 +132,7 @@ class GroupView:
         self.__debug("GroupView: Finished Joining", identifier)
         if identifier in self.joining_servers:
             self.joining_servers.remove(identifier)
+            self.servers.sort()
 
     def wait_till_ready_to_join(self):
         self._ready_to_join_semaphore.acquire()

@@ -23,7 +23,7 @@ class UnicastSender:
     def _ack_sender(self):
         while True:
             with self._storage_semaphore:
-                ts = time.time_ns() / 10 ** 6
+                ts = time.time_ns() / 10 ** 9
                 remove_list = []
                 nonce_list = list(self._storage.keys()).copy()
                 for nonce in nonce_list:
@@ -58,7 +58,7 @@ class UnicastSender:
     def send_udp(self, msg: Message, addr: tuple[str, int], response_id: str):
         msg.encode()
         self.upd_sender.sendto(msg.json_data.encode(), addr)
-        ts = time.time_ns() / 10 ** 6
+        ts = time.time_ns() / 10 ** 9
         self._storage[response_id] = [msg.json_data, addr, ts]
         self._storage_semaphore.release()
 
