@@ -28,10 +28,10 @@
         "total_timeout": 10
     },
     "heartbeat": {
-        "interval": 0.2
+        "interval": 0.5
     },
     "crash_fault_detection": {
-        "timeout": 3
+        "timeout": 5
     },
     "client": {
         "polling_rate": 0.5

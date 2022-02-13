@@ -25,7 +25,8 @@ class UnicastSender:
             with self._storage_semaphore:
                 ts = time.time_ns() / 10 ** 6
                 remove_list = []
-                for nonce in self._storage:
+                nonce_list = list(self._storage.keys()).copy()
+                for nonce in nonce_list:
                     if ts - self._storage[nonce][2] > 5 * self._configuration.get_heartbeat_interval():
                         remove_list.append(nonce)
                     self.upd_sender.sendto(self._storage[nonce][0].encode(), self._storage[nonce][1])
