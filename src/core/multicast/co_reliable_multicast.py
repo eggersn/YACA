@@ -1,10 +1,14 @@
+import random
 import threading
+from src.protocol.consensus.pk_message import PhaseKingMessage
 from src.core.utils.configuration import Configuration
 from src.core.group_view.group_view import GroupView
 from src.core.utils.channel import Channel
 from src.protocol.multicast.piggyback import PiggybackMessage
 from src.protocol.base import Message
 from src.core.multicast.reliable_multicast import ReliableMulticast
+from src.protocol.multicast.nack import NegativeAcknowledgement
+from src.protocol.multicast.to_proposal import TotalOrderProposal
 
 
 class CausalOrderedReliableMulticast(ReliableMulticast):
@@ -16,13 +20,15 @@ class CausalOrderedReliableMulticast(ReliableMulticast):
         channel: Channel,
         group_view: GroupView,
         configuration: Configuration,
-        open: bool = False
+        open: bool = False,
+        malicious: bool = False,
     ):
         super().__init__(multicast_addr, multicast_port, identifier, channel, group_view, configuration, open)
 
         self._co_holdback_queue: list[tuple[dict[str, int], str]] = []
         self._co_lock = threading.Lock()
         self._CO_R_g: dict[str, int] = {}
+        self.__malicious = malicious
 
     def _deliver(self, data, identifier, seqno):
         self._update_storage(data, identifier, seqno)
@@ -53,7 +59,7 @@ class CausalOrderedReliableMulticast(ReliableMulticast):
             if identifier not in self._CO_R_g:
                 self._CO_R_g[identifier] = -1
             if seqno_dict[identifier] > self._CO_R_g[identifier]:
-                    return False
+                return False
 
         return True
 
@@ -75,13 +81,20 @@ class CausalOrderedReliableMulticast(ReliableMulticast):
                     k += 1
 
     def send(self, message: Message, config=False, sign=True):
+        # for testing purposes only
+        if self.__malicious:
+            self.send_malicious(message, config, sign)
+            return
+
         if not message.is_decoded:
             message.decode()
 
         if not self._suspend_multicast or config:
             with self._R_g_lock:
                 with self._co_lock:
-                    pb_message = PiggybackMessage.initFromMessage(message, self._identifier, self._S_p, self._CO_R_g)
+                    pb_message = PiggybackMessage.initFromMessage(
+                        message, self._identifier, self._S_p, self._CO_R_g
+                    )
                     pb_message.encode()
 
                 if sign:
@@ -103,3 +116,168 @@ class CausalOrderedReliableMulticast(ReliableMulticast):
             if not message.is_encoded:
                 message.encode()
             self._response_channel.produce((message.json_data, False))
+
+    #############################################################################################################
+    #                                         FOR TESTING PURPOSES ONLY                                         #
+    #############################################################################################################
+
+    def send_malicious(self, message: Message, config=False, sign=True):
+        if not message.is_decoded:
+            message.decode()
+
+        if not self._suspend_multicast or config:
+            with self._R_g_lock:
+                with self._co_lock:
+                    pb_message = PiggybackMessage.initFromMessage(
+                        message, self._identifier, self._S_p, self._CO_R_g
+                    )
+
+                if pb_message.header == "Phase King: Message":
+                    pk_message = PhaseKingMessage.initFromJSON(message.json_data)
+                    pk_message.decode()
+                    for server in self._group_view.servers:
+                        if server != self._identifier and not self._group_view.check_if_server_is_inactive(
+                            server
+                        ):
+                            malicious_value = pk_message.value
+                            if type(pk_message.value) is int:  # MaxPhaseKing message
+                                malicious_value = random.randint(0, pk_message.value + 5)
+                            elif self.__coin_flip(self._configuration.get_byzantine_coin_flip_probability()):
+                                malicious_value = "malicious_value"
+                            print(
+                                "BYZANTINE [PhaseKing]: Send {} value {} instead of {}".format(
+                                    server, malicious_value, pk_message.value
+                                )
+                            )
+                            malicious_pk_message = PhaseKingMessage.initFromData(
+                                malicious_value, pk_message.phase, pk_message.round, pk_message.topic
+                            )
+                            malicious_pk_message.encode()
+                            malicious_pb_message = PiggybackMessage.initFromMessage(
+                                malicious_pk_message, self._identifier, pb_message.seqno, pb_message.acks
+                            )
+                            malicious_pb_message.encode()
+                            if sign:
+                                malicious_pb_message.sign(self._signature)
+                            self._udp_sock.sendto(
+                                malicious_pb_message.json_data.encode(),
+                                self._group_view.get_unicast_addr_of_server(server),
+                            )
+                elif pb_message.header == "TO: Seqno Proposal":
+                    to_proposal = TotalOrderProposal.initFromJSON(message.json_data)
+                    to_proposal.decode()
+                    for server in self._group_view.servers:
+                        if server != self._identifier and not self._group_view.check_if_server_is_inactive(
+                            server
+                        ):
+                            malicious_value = random.randint(0, to_proposal.seqno + 5)
+                            print(
+                                "BYZANTINE [TO-Proposal]: Send {} value {} instead of {}".format(
+                                    server, malicious_value, to_proposal.seqno
+                                )
+                            )
+                            malicious_to_proposal = TotalOrderProposal.initFromData(
+                                malicious_value, to_proposal.msg_identifier
+                            )
+                            malicious_to_proposal.encode()
+                            malicious_pb_message = PiggybackMessage.initFromMessage(
+                                malicious_to_proposal, self._identifier, pb_message.seqno, pb_message.acks
+                            )
+                            malicious_pb_message.encode()
+                            if sign:
+                                malicious_pb_message.sign(self._signature)
+                            self._udp_sock.sendto(
+                                malicious_pb_message.json_data.encode(),
+                                self._group_view.get_unicast_addr_of_server(server),
+                            )
+
+                pb_message.encode()
+                if sign:
+                    pb_message.sign(self._signature)
+                else:
+                    self._udp_sock.sendto(
+                        pb_message.json_data.encode(), (self._multicast_addr, self._multicast_port)
+                    )
+                response = self._deliver(pb_message.json_data, self._identifier, self._S_p)
+                self._check_holdback_queue()
+
+                self._S_p += 1
+
+            if not self._response_channel.is_empty():
+                response, config = self._response_channel.consume()
+                response_msg = Message.initFromJSON(response)
+                self.send(response_msg, config)
+        else:
+            if not message.is_encoded:
+                message.encode()
+            self._response_channel.produce((message.json_data, False))
+
+    def _receive_nack(self, data, addr):
+        if self.__malicious:
+            self._receive_nack_malicious(data, addr)
+            return
+
+        nack = NegativeAcknowledgement.initFromJSON(data)
+        nack.decode()
+
+        for identifier in nack.nacks:
+            if identifier in self._storage:
+                for seqno in nack.nacks[identifier]:
+                    if seqno >= len(self._storage[identifier]):
+                        break
+
+                    nack_response = PiggybackMessage.initFromJSON(self._storage[identifier][seqno])
+                    self._send_unicast(nack_response, addr)
+
+    def _receive_nack_malicious(self, data, addr):
+        nack = NegativeAcknowledgement.initFromJSON(data)
+        nack.decode()
+
+        for identifier in nack.nacks:
+            if identifier in self._storage:
+                for seqno in nack.nacks[identifier]:
+                    if seqno >= len(self._storage[identifier]):
+                        break
+
+                    nack_response = PiggybackMessage.initFromJSON(self._storage[identifier][seqno])
+                    nack_response.decode()
+
+                    if nack_response.header == "Phase King: Message":
+                        pk_message = PhaseKingMessage.initFromJSON(nack_response.json_data)
+                        pk_message.decode()
+
+                        malicious_value = pk_message.value
+                        if type(pk_message.value) is int:  # MaxPhaseKing message
+                            malicious_value = random.randint(0, pk_message.value + 5)
+                        elif self.__coin_flip(0.5):
+                            malicious_value = "malicious_value"
+                        malicious_pk_message = PhaseKingMessage.initFromData(
+                            malicious_value, pk_message.phase, pk_message.round, pk_message.topic
+                        )
+                        malicious_pk_message.encode()
+                        malicious_pb_message = PiggybackMessage.initFromMessage(
+                            malicious_pk_message, self._identifier, nack_response.seqno, nack_response.acks
+                        )
+                        malicious_pb_message.encode()
+                        malicious_pb_message.sign(self._signature)
+                        self._send_unicast(malicious_pb_message, addr)
+                    elif nack_response.header == "TO: Seqno Proposal":
+                        to_proposal = TotalOrderProposal.initFromJSON(nack_response.json_data)
+                        to_proposal.decode()
+                        malicious_value = random.randint(0, to_proposal.seqno + 5)
+                        malicious_to_proposal = TotalOrderProposal.initFromData(
+                            malicious_value, to_proposal.msg_identifier
+                        )
+                        malicious_to_proposal.encode()
+                        malicious_pb_message = PiggybackMessage.initFromMessage(
+                            malicious_to_proposal, self._identifier, nack_response.seqno, nack_response.acks
+                        )
+                        malicious_pb_message.encode()
+                        malicious_pb_message.sign(self._signature)
+                        self._send_unicast(malicious_pb_message, addr)
+                    else:
+                        self._send_unicast(nack_response, addr)
+
+    def __coin_flip(self, probability):
+        value = random.random()
+        return value < probability

@@ -19,12 +19,14 @@ class MaxPhaseKing:
         group_view: GroupView,
         configuration: Configuration,
         verbose=False,
+        malicious=False,
     ):
         self._response_channel = response_channel
         self._to_holdback_queue = to_holdback_queue
         self._group_view = group_view
         self._configuration = configuration
         self.__verbose = verbose
+        self.__malicious = malicious
 
         self._pk_storage: dict[
             str, list[tuple[int, int], dict[str, int], int, int, int, float]
@@ -33,7 +35,7 @@ class MaxPhaseKing:
 
     def start_new_execution(self, initial_value: int, msg_id: str):
         if msg_id not in self._pk_storage:
-            ts = time.time_ns() / 10 ** 9
+            ts = time.time_ns() / 10**9
             self._pk_storage[msg_id] = [
                 (0, 1),
                 {},
@@ -41,6 +43,7 @@ class MaxPhaseKing:
                 -1,
                 ts,
                 "",
+                initial_value,
             ]
         if msg_id not in self._list_of_kings:
             self._list_of_kings[msg_id] = []
@@ -50,7 +53,6 @@ class MaxPhaseKing:
         pk_message = PhaseKingMessage.initFromData(initial_value, 0, 1, msg_id)
         pk_message.encode()
 
-        self.__debug("MaxPhaseKing: Starting {} with initial value {}".format(msg_id, initial_value))
         self._response_channel.produce((pk_message.json_data, False), trash=True)
 
     def reset(self):
@@ -75,9 +77,9 @@ class MaxPhaseKing:
 
     def check_timeouts(self, halting_servers, send):
         timeout = self._configuration.get_timeout()
-        ts = time.time_ns() / 10 ** 9
+        ts = time.time_ns() / 10**9
         for topic in self._pk_storage:
-            if len(self._pk_storage[topic]) == 6:
+            if len(self._pk_storage[topic]) == 7:
                 if ts - self._pk_storage[topic][4] > timeout:
                     if self._pk_storage[topic][0][1] == 1:
                         # round 1, suspect all servers that did not answer yet
@@ -100,18 +102,18 @@ class MaxPhaseKing:
                             suspect_msg.encode()
                             send(suspect_msg)
 
-    def handle_round1_suspension(self, identifier : str):
+    def handle_round1_suspension(self, identifier: str):
         for topic in self._pk_storage:
             if self._pk_storage[topic][0][1] == 1:
                 if identifier in self._pk_storage[topic][1]:
                     del self._pk_storage[topic][1][identifier]
                 self._check_if_round1_finished(self._pk_storage[topic][0][0], topic)
 
-    def handle_round2_suspension(self, identifier : str):
+    def handle_round2_suspension(self, identifier: str):
         # for topic in self._pk_storage:
         for topic in self._pk_storage:
             if self._pk_storage[topic][0][1] == 2 and self._pk_storage[topic][5] == identifier:
-                ts = time.time_ns() / 10 ** 9
+                ts = time.time_ns() / 10**9
                 self._pk_storage[topic][4] = ts
                 self._pk_storage[topic][5] = self._group_view.get_next_active_after(identifier)
 
@@ -119,7 +121,9 @@ class MaxPhaseKing:
                     # I am the phase king
                     tiebreaker = math.ceil(np.median(list(self._pk_storage[topic][1].values())))
 
-                    pk_message = PhaseKingMessage.initFromData(tiebreaker, self._pk_storage[topic][0][0], 2, topic)
+                    pk_message = PhaseKingMessage.initFromData(
+                        tiebreaker, self._pk_storage[topic][0][0], 2, topic
+                    )
                     pk_message.encode()
                     self._response_channel.produce((pk_message.json_data, False), trash=True)
 
@@ -141,13 +145,13 @@ class MaxPhaseKing:
             self._pk_storage[topic][0] = (phase, 2)
             self._pk_storage[topic][2] = majority_value
             self._pk_storage[topic][3] = majority_count
-            ts = time.time_ns() / 10 ** 9
+            ts = time.time_ns() / 10**9
             self._pk_storage[topic][4] = ts
             self._pk_storage[topic][5] = self._group_view.get_next_active_after(self._pk_storage[topic][5])
 
             self.__debug(
-                "MaxPhaseKing [{}](Phase {} - Round 1): Maj {}, Count {}".format(
-                    topic, phase, majority_value, majority_count
+                "MaxPhaseKing [{}](Phase {} - Round 1): Maj {}, Count {}, Values {}".format(
+                    topic, phase, majority_value, majority_count, list(self._pk_storage[topic][1].values())
                 )
             )
 
@@ -166,6 +170,9 @@ class MaxPhaseKing:
         ):
             return
 
+        self.__debug(
+            "MaxPhaseKing [{}](Phase {} - Round 2): Received tiebreaker {}".format(topic, phase, tiebreaker)
+        )
         self._list_of_kings[topic].append(sender_id)
         N = self._group_view.get_number_of_unsuspended_servers()
         no_of_active_kings = len(
@@ -177,6 +184,7 @@ class MaxPhaseKing:
         )
         f = math.ceil(N / 4) - 1  # assuming worst-case
 
+        value = self._pk_storage[topic][-1] # value of old iteration
         if self._pk_storage[topic][3] > N / 2 + f:
             value = self._pk_storage[topic][2]  # update value with majority
         elif len([v for v in self._pk_storage[topic][1].values() if v <= tiebreaker]) > f:
@@ -185,13 +193,14 @@ class MaxPhaseKing:
         if f + 1 - no_of_active_kings > 0:
             self.__debug("MaxPhaseKing [{}](Phase {} - Round 2): New value {}".format(topic, phase, value))
             # proceed with next phase
-            ts = time.time_ns() / 10 ** 9
-            self._pk_storage[topic] = [(phase + 1, 1), {}, -1, -1, ts, self._pk_storage[topic][5]]
+            ts = time.time_ns() / 10**9
+            self._pk_storage[topic] = [(phase + 1, 1), {}, -1, -1, ts, self._pk_storage[topic][5], value]
             pk_message = PhaseKingMessage.initFromData(value, phase + 1, 1, topic)
             pk_message.encode()
             self._response_channel.produce((pk_message.json_data, False), trash=True)
+
         else:
-            self.__debug("MaxPhaseKing [{}]: Result {}".format(topic, value))
+            self.__debug("MaxPhaseKing* [{}]: Result {}".format(topic, value))
             del self._list_of_kings[topic]
             del self._pk_storage[topic]
             k = 0

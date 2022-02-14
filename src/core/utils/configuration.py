@@ -32,6 +32,9 @@ class Configuration:
     def get_discovery_total_timeout(self):
         return self.data["discovery"]["total_timeout"]
 
+    def get_byzantine_coin_flip_probability(self):
+        return self.data["byzantine"]["coin_flip"]
+
     def get_group_view_file(self, i):
         files = os.listdir("config/" + self.data["initial"]["path"] + "/")
         files.remove("global.json")

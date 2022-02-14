@@ -1,6 +1,7 @@
 import threading
 import time
 import math
+import random
 from src.core.consensus.max_phase_king import MaxPhaseKing
 from src.core.utils.configuration import Configuration
 from src.core.utils.channel import Channel
@@ -25,8 +26,18 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
         group_view: GroupView,
         configuration: Configuration,
         verbose: bool = False,
+        malicious: bool = False,
     ):
-        super().__init__(multicast_addr, multicast_port, identifier, channel, group_view, configuration)
+        super().__init__(
+            multicast_addr,
+            multicast_port,
+            identifier,
+            channel,
+            group_view,
+            configuration,
+            open=False,
+            malicious=malicious,
+        )
 
         self._P_g = -1
         self._A_g = -1
@@ -36,6 +47,7 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
         self._produce_channel = Channel()
         self._to_lock = threading.Lock()
         self.__verbose = verbose
+        self.__malicious = malicious
 
         self._suspended_dict: dict[tuple[str, str], list[str]] = {}
         self._halting_servers: dict[str, str] = {}
@@ -44,7 +56,12 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
         self._join_semaphores = {}
 
         self._max_phase_king = MaxPhaseKing(
-            self._response_channel, self._to_holdback_queue, self._group_view, self._configuration, verbose
+            self._response_channel,
+            self._to_holdback_queue,
+            self._group_view,
+            self._configuration,
+            verbose,
+            malicious,
         )
 
         crash_fault_detection_thread = threading.Thread(target=self._check_holdback_timestamps)
@@ -87,7 +104,7 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
                 join_request = JoinRequest.initFromJSON(msg.request)
                 join_request.decode()
                 self._join_semaphores[join_request.identifier] = threading.Semaphore(0)
-        
+
         self._channel.produce(data)
 
     def _to_consume(self, data, identifier, seqno):
@@ -122,19 +139,23 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
             commited_servers = self._to_holdback_dict[entry[1]][1]
             commited_servers.append(identifier)
             entry[2] += 1
+            N = self._group_view.get_number_of_unsuspended_servers()
             self.__debug(
                 "TO-Multicast: Received seqno proposal {} of server {} for message {} ({}/{})".format(
                     message.seqno,
                     identifier,
                     message.msg_identifier,
                     entry[2],
-                    self._group_view.get_number_of_unsuspended_servers(),
+                    N,
                 )
             )
-            if entry[0] < message.seqno:
-                entry[0] = message.seqno
+            if entry[4] < message.seqno:
+                entry[4] = message.seqno
                 self._A_g = max(self._A_g, message.seqno)
                 self._to_holdback_queue.sort(key=lambda entry: (entry[0], entry[1]))
+            if entry[2] == N:
+                self.__debug("MaxPhaseKing*: Starting {} with initial value {}".format(entry[1], entry[0]))
+                self._max_phase_king.start_new_execution(entry[4], entry[1])
 
             self._check_to_holdback_queue()
 
@@ -158,9 +179,6 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
                 self._to_deliver(self._to_holdback_dict[entry[1]][0])
                 with self._to_holdback_dict_lock:
                     self._to_holdback_dict[entry[1]] = None
-            elif entry[2] == N:
-                self._max_phase_king.start_new_execution(entry[0], entry[1])
-                break
             else:
                 break
 
@@ -168,7 +186,10 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
         suspect_msg = GroupViewSuspect.initFromJSON(data)
         suspect_msg.decode()
 
-        if self._group_view.identifier in self._group_view.joining_servers and suspect_msg.identifier in self._join_semaphores:
+        if (
+            self._group_view.identifier in self._group_view.joining_servers
+            and suspect_msg.identifier in self._join_semaphores
+        ):
             self._join_semaphores[suspect_msg.identifier].acquire()
 
         if self._group_view.check_if_participant(suspect_msg.identifier):
@@ -210,9 +231,12 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
                 len(self._suspended_dict[(suspect_msg.identifier, suspect_msg.topic)]) > f
                 and self._group_view.identifier
                 not in self._suspended_dict[(suspect_msg.identifier, suspect_msg.topic)]
+                and not self.__malicious
             ):
                 # peer pressure...
-                response_suspect_msg = GroupViewSuspect.initFromData(suspect_msg.identifier, suspect_msg.topic)
+                response_suspect_msg = GroupViewSuspect.initFromData(
+                    suspect_msg.identifier, suspect_msg.topic
+                )
                 response_suspect_msg.encode()
                 self._response_channel.produce((response_suspect_msg.json_data, True))
                 print("Peer Pressure", response_suspect_msg.json_data, self._suspended_dict)
@@ -228,7 +252,10 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
                 self._max_phase_king.handle_round1_suspension(suspect_msg.identifier)
                 self._max_phase_king.handle_round2_suspension(suspect_msg.identifier)
 
-        if self._group_view.identifier in self._group_view.joining_servers and suspect_msg.identifier in self._join_semaphores:
+        if (
+            self._group_view.identifier in self._group_view.joining_servers
+            and suspect_msg.identifier in self._join_semaphores
+        ):
             self._join_semaphores[suspect_msg.identifier].release()
 
     def _handle_halt_message(self, data):
@@ -356,7 +383,7 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
             with self._to_holdback_dict_lock:
                 timestamp = time.time_ns() / 10**9
                 self._to_holdback_dict[message.msg_identifier] = [data, [], timestamp]
-            self._to_holdback_queue.append([0, message.msg_identifier, 0, False])
+            self._to_holdback_queue.append([self._P_g, message.msg_identifier, 0, False, 0])
             self._to_holdback_queue.sort(key=lambda entry: (entry[0], entry[1]))
 
             response_msg = TotalOrderProposal.initFromData(self._P_g, message.msg_identifier)
@@ -387,10 +414,15 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
 
     def halt_multicast(self, wait_until):
         self.__debug("TO-Multicast: Halting while waiting for", wait_until)
+
         if self._group_view.identifier in self._group_view.joining_servers:
             self._halting_servers[self._group_view.identifier] = wait_until
             self._halting_semaphore.acquire()
         else:
+            if self.__malicious and self.__coin_flip(
+                self._configuration.get_byzantine_coin_flip_probability()
+            ):
+                return  # small probability that malicious process does not halt
             config = not self._suspend_multicast
             self.halt_sending()
             halt_msg = HaltMessage.initFromData(wait_until)
@@ -414,3 +446,7 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
     def __debug(self, *msgs):
         if self.__verbose:
             print(*msgs)
+
+    def __coin_flip(self, probability):
+        value = random.random()
+        return value < probability

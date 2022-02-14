@@ -128,8 +128,9 @@ def spawn_processes_menu():
         print_menu_banner("Spawn Processes")
         options = [
             "1. Launch Server",
-            "2. Launch Client",
-            "3. Return to Main Menu",
+            "2. Launch Malicious Server",
+            "3. Launch Client",
+            "4. Return to Main Menu",
         ]
         choice = enquiries.choose("Choose one of these options: ", options)
 
@@ -140,11 +141,16 @@ def spawn_processes_menu():
         instances = int(input())
 
         if choice == options[0]:
-            for i in range(instances):
+            for _ in range(instances):
                 p = multiprocessing.Process(target=launch_server)
                 p.start()
                 processes["server"].append(p)
-        elif choice == options[1]:
+        if choice == options[1]:
+            for _ in range(instances):
+                p = multiprocessing.Process(target=launch_malicious_server)
+                p.start()
+                processes["malicious_server"].append(p)
+        elif choice == options[2]:
             for _ in range(instances):
                 p = multiprocessing.Process(target=launch_client)
                 p.start()
@@ -157,6 +163,11 @@ def launch_server(initial=False, i=0):
     server = Server(initial, i, verbose=True)
     server.start()
 
+def launch_malicious_server(initial=False, i=0):
+    sys.stdout = open("logs/malicious-server-" + str(os.getpid()) + ".out", "a", buffering=1)
+    sys.stderr = open("logs/malicious-server-" + str(os.getpid()) + ".out", "a", buffering=1)
+    server = Server(initial, i, verbose=True, malicious=True)
+    server.start()
 
 def inc_string(string):
     if string == "z" * len(string):
@@ -232,6 +243,7 @@ def main():
             os.remove(os.path.join("logs/", f))
 
     processes["server"] = []
+    processes["malicious_server"] = []
     processes["client"] = []
 
     if len(sys.argv) > 1 and "-i" in sys.argv[1]:

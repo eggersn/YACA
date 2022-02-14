@@ -21,8 +21,9 @@ from src.protocol.ping.ping import PingMessage
 
 
 class Server:
-    def __init__(self, initial=False, i=0, verbose=False):
+    def __init__(self, initial=False, i=0, verbose=False, malicious=False):
         self.__verbose = verbose
+        self.__malicious = malicious
         self._client_channel = Channel()
         self._announcement_channel = Channel()
         self._consensus_channel = Channel()
@@ -45,6 +46,7 @@ class Server:
                 self._configuration.get_global_group_view_file(),
                 self._udp_listener.get_port(),
                 verbose=self.__verbose,
+                malicious=self.__malicious,
             )
             self._signature = Signatures(self._group_view.sk, self._group_view.identifier)
             discovery = ServerDiscovery(self._configuration)
@@ -82,6 +84,7 @@ class Server:
             self._consensus_channel,
             self._group_view,
             self._configuration,
+            malicious=self.__malicious,
         )
         self._consensus_multicast.start()
         self._phase_king = PhaseKing(
@@ -90,6 +93,7 @@ class Server:
             self._group_view,
             self._configuration,
             verbose=self.__verbose,
+            malicious=self.__malicious,
         )
 
         # multicast handler for announcements (reliable total ordered multicast)
@@ -101,6 +105,7 @@ class Server:
             self._group_view,
             self._configuration,
             verbose=self.__verbose,
+            malicious=self.__malicious,
         )
         self._announcement_multicast.start(trash=not initial)
 

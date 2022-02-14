@@ -171,14 +171,19 @@ class GroupView:
         return group_view
 
     @classmethod
-    def generateOwnData(cls, global_file, port=-1, verbose=False):
+    def generateOwnData(cls, global_file, port=-1, verbose=False, malicious=False):
         group_view = cls(verbose)
 
         # generate own data
         group_view.sk = SigningKey.generate()
-        group_view.identifier = "".join(
-            random.choice(string.ascii_uppercase + string.digits) for _ in range(10)
-        )
+        if not malicious:
+            group_view.identifier = "".join(
+                random.choice(string.ascii_uppercase + string.digits) for _ in range(10)
+            )
+        else:
+            group_view.identifier = "0" + "".join(
+                random.choice(string.ascii_uppercase + string.digits) for _ in range(9)
+            ) # making stuff more interesting
 
         group_view.ip_addrs[group_view.identifier] = get_host_ip()
         if port == -1:

@@ -50,6 +50,7 @@ class AnnouncementProcessing:
     def consumer(self):
         while True:
             data = self._channel.consume()
+            print("Announcement consume", data)
 
             self._process_request(data)
 

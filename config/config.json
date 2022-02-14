@@ -35,5 +35,8 @@
     },
     "client": {
         "polling_rate": 0.5
+    },
+    "byzantine": {
+        "coin_flip": 0.3
     }
 }

@@ -19,6 +19,7 @@ class PhaseKing:
         configuration: Configuration,
         topic="",
         verbose=False,
+        malicious=False,  # for testing purposes only
     ):
         self._channel = consensus_channel
         self._multicast = consensus_multicast
@@ -26,6 +27,7 @@ class PhaseKing:
         self._configuration = configuration
         self._topic = topic
         self.__verbose = verbose
+        self.__malicious = malicious
 
     def consensus(self, value: str):
         # Importantly, we require that all processes have the same value for N.
@@ -70,14 +72,11 @@ class PhaseKing:
                 if server_id not in sender_ids and not self._group_view.check_if_server_is_inactive(
                     server_id
                 ):
-                    print(self._group_view.servers)
                     self.__debug("PhaseKing: Suspecting {} in Round 1".format(server_id))
                     suspect_msg = GroupViewSuspect.initFromData(server_id, self._topic)
                     suspect_msg.encode()
 
                     self._multicast.send(suspect_msg)
-
-
 
         self.__debug(
             'PhaseKing ({}Phase {} - Round 1): Initial value "{}"'.format(
@@ -245,7 +244,8 @@ class PhaseKing:
                 pk_message.encode()
                 if self._multicast is None:
                     raise RuntimeError("I should not be phaseking during simulation")
-                self._multicast.send(pk_message)
+                if self._multicast is not None:
+                    self._multicast.send(pk_message)
 
             elif self._multicast is not None:
                 # start timer for crash fault detection of phase king
@@ -272,6 +272,11 @@ class PhaseKing:
 
                         if pk_message.phase == phase and pk_message.round == 2 and sender_id == phase_king:
                             tiebreaker = pk_message.value
+                            self.__debug(
+                                'PhaseKing ({}Phase {} - Round 2): Received tiebreaker "{}"'.format(
+                                    (self._topic + "; ") if self._topic != "" else "", phase, tiebreaker
+                                )
+                            )
                             break
 
                     elif message.header == "View: Suspect":
@@ -286,6 +291,7 @@ class PhaseKing:
                             if (
                                 len(suspecting_servers) > f
                                 and self._group_view.identifier not in suspecting_servers
+                                and self._group_view.identifier not in self._group_view.joining_servers
                             ):
                                 response_suspect_msg = GroupViewSuspect.initFromData(
                                     suspect_msg.identifier, suspect_msg.topic
