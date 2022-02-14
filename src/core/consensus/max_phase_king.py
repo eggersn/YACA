@@ -149,15 +149,17 @@ class MaxPhaseKing:
             self._pk_storage[topic][4] = ts
             self._pk_storage[topic][5] = self._group_view.get_next_active_after(self._pk_storage[topic][5])
 
+            values = list(self._pk_storage[topic][1].values())
+            values.sort()
             self.__debug(
                 "MaxPhaseKing [{}](Phase {} - Round 1): Maj {}, Count {}, Values {}".format(
-                    topic, phase, majority_value, majority_count, list(self._pk_storage[topic][1].values())
+                    topic, phase, majority_value, majority_count, values
                 )
             )
 
             if self._group_view.identifier == self._pk_storage[topic][5]:
                 # I am the phase king
-                tiebreaker = math.ceil(np.median(list(self._pk_storage[topic][1].values())))
+                tiebreaker = math.ceil(np.median(values))
                 pk_message = PhaseKingMessage.initFromData(tiebreaker, phase, 2, topic)
                 pk_message.encode()
                 self._response_channel.produce((pk_message.json_data, False), trash=True)
@@ -171,7 +173,7 @@ class MaxPhaseKing:
             return
 
         self.__debug(
-            "MaxPhaseKing [{}](Phase {} - Round 2): Received tiebreaker {}".format(topic, phase, tiebreaker)
+            "MaxPhaseKing [{}](Phase {} - Round 2): Received tiebreaker {} from {}".format(topic, phase, tiebreaker, sender_id)
         )
         self._list_of_kings[topic].append(sender_id)
         N = self._group_view.get_number_of_unsuspended_servers()

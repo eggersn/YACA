@@ -263,6 +263,10 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
         halt_msg.decode()
 
         sender_id, _ = halt_msg.get_signature()
+
+        if self._identifier in self._group_view.joining_servers and halt_msg.wait_until in self._join_semaphores:
+            self._join_semaphores[halt_msg.wait_until].acquire()
+
         self._halting_servers[sender_id] = halt_msg.wait_until
         self.__debug(
             "TO-Multicast: Received halt message of server {} (wait until: {})".format(
@@ -271,6 +275,9 @@ class TotalOrderedReliableMulticast(CausalOrderedReliableMulticast):
         )
 
         self._check_hold_messages()
+
+        if self._identifier in self._group_view.joining_servers and halt_msg.wait_until in self._join_semaphores:
+            self._join_semaphores[halt_msg.wait_until].release()
 
     def _check_hold_messages(self):
         if self._group_view.identifier in self._group_view.joining_servers:

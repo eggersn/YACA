@@ -141,7 +141,7 @@ class CausalOrderedReliableMulticast(ReliableMulticast):
                         ):
                             malicious_value = pk_message.value
                             if type(pk_message.value) is int:  # MaxPhaseKing message
-                                malicious_value = random.randint(0, pk_message.value + 5)
+                                malicious_value = random.randint(0, 2*pk_message.value)
                             elif self.__coin_flip(self._configuration.get_byzantine_coin_flip_probability()):
                                 malicious_value = "malicious_value"
                             print(
@@ -248,7 +248,7 @@ class CausalOrderedReliableMulticast(ReliableMulticast):
 
                         malicious_value = pk_message.value
                         if type(pk_message.value) is int:  # MaxPhaseKing message
-                            malicious_value = random.randint(0, pk_message.value + 5)
+                            malicious_value = random.randint(0, 2*pk_message.value)
                         elif self.__coin_flip(0.5):
                             malicious_value = "malicious_value"
                         malicious_pk_message = PhaseKingMessage.initFromData(
@@ -264,7 +264,7 @@ class CausalOrderedReliableMulticast(ReliableMulticast):
                     elif nack_response.header == "TO: Seqno Proposal":
                         to_proposal = TotalOrderProposal.initFromJSON(nack_response.json_data)
                         to_proposal.decode()
-                        malicious_value = random.randint(0, to_proposal.seqno + 5)
+                        malicious_value = random.randint(0, to_proposal.seqno+5)
                         malicious_to_proposal = TotalOrderProposal.initFromData(
                             malicious_value, to_proposal.msg_identifier
                         )
